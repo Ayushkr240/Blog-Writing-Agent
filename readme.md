@@ -63,11 +63,11 @@ The system uses a **StateGraph** to coordinate the different stages of the blog-
                     │ research needed│
                     └────────┬────────┘
                              │
-                   ┌─────────┴─────────┐
-                   │                   │
-              Research needed     No research
-                   │                   │
-                   ▼                   │
+                   ┌─────────┴──────────┐
+                   │                    │
+              Research needed      No research
+                   │                    │
+                   ▼                    │
             ┌──────────────┐            │
             │   Research   │            │
             │              │            │
