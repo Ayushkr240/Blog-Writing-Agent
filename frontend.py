@@ -14,31 +14,12 @@ st.set_page_config(
 
 
 # ============================================================
-# SESSION STATE
-# ============================================================
-
-# The final blog must survive Streamlit reruns.
-if "final_md" not in st.session_state:
-    st.session_state.final_md = ""
-
-if "filename" not in st.session_state:
-    st.session_state.filename = "blog.md"
-
-if "evidence_count" not in st.session_state:
-    st.session_state.evidence_count = 0
-
-if "generated_topic" not in st.session_state:
-    st.session_state.generated_topic = ""
-
-
-# ============================================================
 # CUSTOM CSS
 # ============================================================
 
 st.markdown(
     """
     <style>
-
         .main-title {
             font-size: 2.6rem;
             font-weight: 700;
@@ -87,7 +68,6 @@ st.markdown(
             border-radius: 12px;
             background: white;
         }
-
     </style>
     """,
     unsafe_allow_html=True,
@@ -139,7 +119,7 @@ STAGES = {
     "router": "🔎 Analyzing the topic",
     "research": "🌐 Collecting evidence",
     "orchestrator": "🧠 Creating the blog plan",
-    "worker": "✍️ Writing blog sections",
+    "worker": "✍️ Generating the blog",
     "reducer": "✨ Finalizing the blog",
 }
 
@@ -148,9 +128,14 @@ def render_progress(
     status_placeholder,
     current_stage,
     completed_stages,
-    written_sections,
 ):
-    """Render the workflow progress."""
+    """
+    Render the current LangGraph workflow progress.
+
+    The worker stage represents the complete blog-generation
+    process. Individual worker/section progress is intentionally
+    not displayed.
+    """
 
     html = '<div class="progress-box">'
 
@@ -166,23 +151,24 @@ def render_progress(
 
         label = STAGES[stage]
 
+        # ----------------------------------------------------
+        # Determine stage state
+        # ----------------------------------------------------
+
         if stage in completed_stages:
+
             state_class = "stage-done"
             icon = "✅"
 
         elif stage == current_stage:
+
             state_class = "stage-running"
             icon = "⏳"
 
         else:
+
             state_class = "stage-waiting"
             icon = "○"
-
-        if stage == "worker" and written_sections:
-            label = (
-                f"{label} "
-                f"({len(written_sections)}/5 sections)"
-            )
 
         html += (
             f'<div class="stage {state_class}">'
@@ -209,66 +195,80 @@ if generate:
     # --------------------------------------------------------
 
     if not topic.strip():
-        st.warning("Please enter a blog topic first.")
+
+        st.warning(
+            "Please enter a blog topic first."
+        )
+
         st.stop()
 
     # --------------------------------------------------------
-    # IMPORTANT:
-    # Clear the previous result ONLY when the user starts
-    # generating a NEW blog.
-    #
-    # We do NOT clear this during normal Streamlit reruns.
+    # Reset workflow state
     # --------------------------------------------------------
 
-    st.session_state.final_md = ""
-    st.session_state.filename = "blog.md"
-    st.session_state.evidence_count = 0
-    st.session_state.generated_topic = topic.strip()
-
-    # Local workflow state
     completed_stages = set()
-    written_sections = {}
-    evidence_count = 0
+
     final_md = ""
+
+    evidence_count = 0
+
+    # The orchestrator determines the number of sections
+    # dynamically. This variable is used only for information
+    # shown to the user.
+    total_sections = 0
+
+    # --------------------------------------------------------
+    # Layout
+    # --------------------------------------------------------
 
     st.divider()
 
-    left, right = st.columns([1, 2])
+    left, right = st.columns(
+        [1, 2]
+    )
 
     # ========================================================
-    # LEFT — WORKFLOW PROGRESS
+    # LEFT COLUMN — WORKFLOW PROGRESS
     # ========================================================
 
     with left:
 
-        st.subheader("Workflow Progress")
+        st.subheader(
+            "Workflow Progress"
+        )
 
         progress_placeholder = st.empty()
 
         render_progress(
             progress_placeholder,
             current_stage="router",
-            completed_stages=set(),
-            written_sections=written_sections,
+            completed_stages=completed_stages,
         )
 
     # ========================================================
-    # RIGHT — LIVE ACTIVITY
+    # RIGHT COLUMN — LIVE ACTIVITY
     # ========================================================
 
     with right:
 
-        st.subheader("Live Activity")
+        st.subheader(
+            "Live Activity"
+        )
 
         activity_placeholder = st.empty()
 
         activity_messages = []
 
         def add_activity(message):
+            """
+            Add a message to the live activity panel.
+            """
 
-            activity_messages.append(message)
+            activity_messages.append(
+                message
+            )
 
-            # Keep the activity panel readable
+            # Display only the latest 8 messages.
             visible = activity_messages[-8:]
 
             activity_placeholder.markdown(
@@ -279,7 +279,7 @@ if generate:
             )
 
     # ========================================================
-    # RUN BACKEND
+    # RUN LANGGRAPH WORKFLOW
     # ========================================================
 
     try:
@@ -288,7 +288,10 @@ if generate:
             topic.strip()
         ):
 
-            if not isinstance(event, dict):
+            if not isinstance(
+                event,
+                dict,
+            ):
                 continue
 
             # =================================================
@@ -319,7 +322,8 @@ if generate:
                 if needs_research:
 
                     add_activity(
-                        f"Topic analyzed → research required "
+                        f"Topic analyzed → "
+                        f"research required "
                         f"({mode} mode)."
                     )
 
@@ -328,8 +332,9 @@ if generate:
                 else:
 
                     add_activity(
-                        f"Topic analyzed → no web research "
-                        f"required ({mode} mode)."
+                        f"Topic analyzed → "
+                        f"no web research required "
+                        f"({mode} mode)."
                     )
 
                     current_stage = "orchestrator"
@@ -338,7 +343,6 @@ if generate:
                     progress_placeholder,
                     current_stage=current_stage,
                     completed_stages=completed_stages,
-                    written_sections=written_sections,
                 )
 
             # =================================================
@@ -374,7 +378,6 @@ if generate:
                     progress_placeholder,
                     current_stage="orchestrator",
                     completed_stages=completed_stages,
-                    written_sections=written_sections,
                 )
 
             # =================================================
@@ -398,7 +401,10 @@ if generate:
 
                 if plan is not None:
 
-                    # Pydantic object
+                    # -----------------------------------------
+                    # Pydantic Plan object
+                    # -----------------------------------------
+
                     if hasattr(
                         plan,
                         "blog_title",
@@ -408,11 +414,14 @@ if generate:
                             plan.blog_title
                         )
 
-                        task_count = len(
+                        total_sections = len(
                             plan.tasks
                         )
 
+                    # -----------------------------------------
                     # Dictionary fallback
+                    # -----------------------------------------
+
                     elif isinstance(
                         plan,
                         dict,
@@ -423,12 +432,16 @@ if generate:
                             "Untitled Blog",
                         )
 
-                        task_count = len(
+                        total_sections = len(
                             plan.get(
                                 "tasks",
                                 [],
                             )
                         )
+
+                    # -----------------------------------------
+                    # Unknown plan format
+                    # -----------------------------------------
 
                     else:
 
@@ -436,13 +449,27 @@ if generate:
                             "Blog plan created"
                         )
 
-                        task_count = 5
+                        total_sections = 0
 
-                    add_activity(
-                        f"Plan created: "
-                        f"'{blog_title}' "
-                        f"with {task_count} sections."
-                    )
+                    # -----------------------------------------
+                    # Activity message
+                    # -----------------------------------------
+
+                    if total_sections:
+
+                        add_activity(
+                            f"Plan created: "
+                            f"'{blog_title}' "
+                            f"with "
+                            f"{total_sections} sections."
+                        )
+
+                    else:
+
+                        add_activity(
+                            f"Plan created: "
+                            f"'{blog_title}'."
+                        )
 
                 else:
 
@@ -454,52 +481,26 @@ if generate:
                     progress_placeholder,
                     current_stage="worker",
                     completed_stages=completed_stages,
-                    written_sections=written_sections,
                 )
 
             # =================================================
-            # WORKERS
+            # WORKERS / BLOG GENERATION
             # =================================================
 
-            elif "worker" in event:
+            elif "workers" in event:
 
-                worker_update = event.get(
-                    "worker",
-                    {},
+                completed_stages.add(
+                    "worker"
                 )
 
-                sections = worker_update.get(
-                    "sections",
-                    [],
+                add_activity(
+                    "Blog generation completed."
                 )
-
-                for section in sections:
-
-                    if (
-                        isinstance(
-                            section,
-                            (tuple, list),
-                        )
-                        and len(section) == 2
-                    ):
-
-                        task_id = section[0]
-                        section_md = section[1]
-
-                        written_sections[
-                            task_id
-                        ] = section_md
-
-                        add_activity(
-                            f"Section "
-                            f"{task_id}/5 completed."
-                        )
 
                 render_progress(
                     progress_placeholder,
-                    current_stage="worker",
+                    current_stage="reducer",
                     completed_stages=completed_stages,
-                    written_sections=written_sections,
                 )
 
             # =================================================
@@ -527,43 +528,112 @@ if generate:
                 )
 
                 add_activity(
-                    "All sections combined and blog finalized."
+                    "All sections combined "
+                    "and blog finalized."
                 )
 
                 render_progress(
                     progress_placeholder,
-                    current_stage="reducer",
+                    current_stage=None,
                     completed_stages=completed_stages,
-                    written_sections=written_sections,
                 )
 
         # ====================================================
-        # SAVE FINAL BLOG INTO SESSION STATE
+        # FINAL RESULT
         # ====================================================
 
         if final_md:
 
-            st.session_state.final_md = (
+            # ------------------------------------------------
+            # Ensure every workflow stage is displayed as done
+            # ------------------------------------------------
+
+            render_progress(
+                progress_placeholder,
+                current_stage=None,
+                completed_stages={
+                    "router",
+                    "research",
+                    "orchestrator",
+                    "worker",
+                    "reducer",
+                },
+            )
+
+            st.success(
+                "🎉 Blog generated successfully!"
+            )
+
+            # ------------------------------------------------
+            # Research information
+            # ------------------------------------------------
+
+            if evidence_count:
+
+                st.caption(
+                    f"Research used "
+                    f"{evidence_count} "
+                    f"evidence source(s)."
+                )
+
+            # ------------------------------------------------
+            # Section information
+            # ------------------------------------------------
+
+            if total_sections:
+
+                st.caption(
+                    f"The orchestrator created "
+                    f"a {total_sections}-section blog."
+                )
+
+            st.divider()
+
+            # =================================================
+            # FINAL BLOG
+            # =================================================
+
+            st.subheader(
+                "📖 Final Blog"
+            )
+
+            st.markdown(
+                '<div class="blog-output">',
+                unsafe_allow_html=True,
+            )
+
+            st.markdown(
                 final_md
             )
 
-            st.session_state.evidence_count = (
-                evidence_count
+            st.markdown(
+                "</div>",
+                unsafe_allow_html=True,
             )
 
-            # ------------------------------------------------
-            # Generate a safe filename
-            # ------------------------------------------------
+            st.divider()
 
+            # =================================================
+            # DOWNLOAD
+            # =================================================
+
+            st.subheader(
+                "📥 Download"
+            )
+
+            # Default filename
             filename = "blog.md"
+
+            # ------------------------------------------------
+            # Extract title from the Markdown H1
+            # ------------------------------------------------
 
             lines = final_md.splitlines()
 
             if lines:
 
                 first_line = (
-                    lines[0]
-                    .strip()
+                    lines[0].strip()
                 )
 
                 if first_line.startswith(
@@ -575,6 +645,7 @@ if generate:
                         .strip()
                     )
 
+                    # Windows-safe filename characters
                     invalid_chars = (
                         '<>:"/\\|?*'
                     )
@@ -587,25 +658,40 @@ if generate:
                     ).strip()
 
                     if not filename:
+
                         filename = "blog"
 
                     filename += ".md"
 
-            st.session_state.filename = (
-                filename
+            # ------------------------------------------------
+            # Browser download
+            # ------------------------------------------------
+
+            st.download_button(
+                label="⬇️ Download Markdown File",
+                data=final_md,
+                file_name=filename,
+                mime="text/markdown",
+                use_container_width=True,
+                on_click="ignore",
             )
 
         else:
 
             st.error(
-                "The workflow finished, but no final blog "
-                "was returned."
+                "The workflow finished, "
+                "but no final blog was returned."
             )
+
+    # ========================================================
+    # ERROR HANDLING
+    # ========================================================
 
     except Exception as exc:
 
         st.error(
-            "❌ An error occurred while generating the blog."
+            "❌ An error occurred while "
+            "generating the blog."
         )
 
         with st.expander(
@@ -616,94 +702,7 @@ if generate:
 
 
 # ============================================================
-# DISPLAY SAVED BLOG
-# ============================================================
-#
-# This section is OUTSIDE `if generate`.
-#
-# That is the key fix.
-#
-# Even if Streamlit reruns after clicking Download,
-# session_state still contains the generated blog.
-# ============================================================
-
-if st.session_state.final_md:
-
-    st.divider()
-
-    # ========================================================
-    # SUCCESS
-    # ========================================================
-
-    st.success(
-        "🎉 Blog generated successfully!"
-    )
-
-    if st.session_state.evidence_count:
-
-        st.caption(
-            f"Research used "
-            f"{st.session_state.evidence_count} "
-            f"evidence source(s)."
-        )
-
-    # ========================================================
-    # FINAL BLOG
-    # ========================================================
-
-    st.divider()
-
-    st.subheader(
-        "📖 Final Blog"
-    )
-
-    st.markdown(
-        '<div class="blog-output">',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        st.session_state.final_md
-    )
-
-    st.markdown(
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    # ========================================================
-    # DOWNLOAD
-    # ========================================================
-
-    st.divider()
-
-    st.subheader(
-        "📥 Download"
-    )
-
-    st.download_button(
-        label="⬇️ Download Markdown File",
-
-        data=st.session_state.final_md,
-
-        file_name=st.session_state.filename,
-
-        mime="text/markdown",
-
-        use_container_width=True,
-
-        # Prevent unnecessary Streamlit rerun
-        # when the download button is clicked.
-        on_click="ignore",
-    )
-
-
-# ============================================================
 # FOOTER
 # ============================================================
 
 st.divider()
-
-st.caption(
-    "Built with LangGraph, Gemini, Tavily, LangChain and Streamlit."
-)

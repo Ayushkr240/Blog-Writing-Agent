@@ -1,275 +1,403 @@
-# 📝 Blog Writing Agent
+# ✍️ Blog Writing Agent
 
-An AI-powered **Blog Writing Agent** built with **LangGraph, Google Gemini, Tavily, LangChain, and Streamlit**.
+A multi-agent AI system that researches a topic, gathers supporting evidence, creates a structured blog plan, generates the blog sections, and combines everything into a polished final Markdown blog.
 
-The system takes a blog topic from the user and automatically goes through a multi-stage workflow to research the topic, create a structured writing plan, generate individual sections, combine them, and produce a complete Markdown blog that can be downloaded.
-
----
-
-## 🚀 Features
-
-- 🤖 **AI-powered blog generation**
-- 🔎 **Web research using Tavily**
-- 🧠 **Google Gemini-powered reasoning and writing**
-- 🕸️ **LangGraph workflow orchestration**
-- 📚 **Evidence-based writing for researched topics**
-- 📝 **Structured 5-section blog generation**
-- 📊 **Live workflow progress in Streamlit**
-- 📄 **Markdown (`.md`) output**
-- ⬇️ **Downloadable final blog**
-- 🔐 API keys kept locally using `.env`
+Built using **LangGraph**, **LangChain**, **OpenAI**, **Tavily**, and **Streamlit**.
 
 ---
 
-## 🏗️ Architecture
+## 🚀 Overview
 
-The Blog Writing Agent follows a multi-stage LangGraph workflow:
+The **Blog Writing Agent** is a LangGraph-based multi-agent workflow designed to automate the complete blog-writing process.
+
+Instead of asking a single LLM to directly write an entire blog, the system divides the task into specialized stages:
+
+1. Topic analysis
+2. Research decision
+3. Evidence collection
+4. Blog planning
+5. Section generation
+6. Blog finalization
+7. Markdown download
+
+The system can determine whether web research is required, collect supporting sources when necessary, create a structured **5–7 section blog plan**, generate the planned sections sequentially, and finally combine them into a polished Markdown document.
+
+---
+
+## ✨ Features
+
+- 🧠 **Multi-agent LangGraph architecture**
+- 🔎 **Automatic topic analysis**
+- 🌐 **Conditional web research**
+- 📚 **Evidence collection using Tavily**
+- 🎯 **Deterministic source-authority scoring**
+- 📝 **Structured 5–7 section blog planning**
+- ✍️ **Sequential blog section generation**
+- 🔄 **Final blog reduction and refinement**
+- 📊 **Live workflow stage progress in Streamlit**
+- 📋 **Live activity updates**
+- 📖 **Final Markdown blog rendering**
+- 📥 **Download generated blog as `.md`**
+- 🔐 **Environment-variable based API key management**
+- 🛡️ **Robust parsing and fallback handling**
+- 🧩 **Pydantic-based structured state**
+- 🧠 **Context-aware blog generation using research evidence**
+
+---
+
+# 🏗️ Architecture
+
+The system uses a **StateGraph** to coordinate the different stages of the blog-writing process.
 
 ```text
-                    ┌───────────────┐
-                    │     Topic     │
-                    │    (User)     │
-                    └───────┬───────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │    Router     │
-                    │               │
-                    │ Research?     │
-                    └───────┬───────┘
-                            │
-                   ┌────────┴────────┐
-                   │                 │
-                Research          No Research
-                   │                 │
-                   ▼                 │
-             ┌───────────┐           │
-             │  Tavily   │           │
-             │  Search   │           │
-             └─────┬─────┘           │
-                   │                 │
-                   ▼                 │
-          ┌─────────────────┐        │
-          │ Evidence        │        │
-          │ Selection       │        │
-          │                 │        │
-          │ Max 12 Sources  │        │
-          └────────┬────────┘        │
-                   │                 │
-                   └────────┬────────┘
-                            ▼
-                    ┌───────────────┐
-                    │ Orchestrator  │
-                    │               │
-                    │ Creates 5     │
-                    │ blog sections │
-                    └───────┬───────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │    Workers    │
-                    │               │
-                    │  Section 1    │
-                    │  Section 2    │
-                    │  Section 3    │
-                    │  Section 4    │
-                    │  Section 5    │
-                    └───────┬───────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │    Reducer    │
-                    │               │
-                    │ Combines all  │
-                    │ sections      │
-                    └───────┬───────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │ Final Markdown│
-                    │     Blog      │
-                    └───────────────┘
+                    ┌─────────────────┐
+                    │      START      │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │     Router      │
+                    │                 │
+                    │ Analyze topic   │
+                    │ Decide whether  │
+                    │ research needed│
+                    └────────┬────────┘
+                             │
+                   ┌─────────┴─────────┐
+                   │                   │
+              Research needed     No research
+                   │                   │
+                   ▼                   │
+            ┌──────────────┐            │
+            │   Research   │            │
+            │              │            │
+            │ Tavily search│            │
+            │ Evidence     │            │
+            └──────┬───────┘            │
+                   │                    │
+                   └─────────┬──────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │  Orchestrator   │
+                    │                 │
+                    │ Create blog     │
+                    │ plan            │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │     Workers     │
+                    │                 │
+                    │ Generate the    │
+                    │ planned blog    │
+                    │ sections        │
+                    │ sequentially    │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │     Reducer     │
+                    │                 │
+                    │ Combine and     │
+                    │ finalize blog   │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │      END        │
+                    └─────────────────┘
 ```
 
 ---
 
-## 🔄 Workflow
+# 🔄 Workflow
 
-### 1. Router
+## 1. Topic Analysis
 
-The router analyzes the user's topic and determines whether web research is required.
+The router analyzes the user's topic and determines the appropriate workflow mode.
 
-It can select between:
+It decides whether external research is required.
 
-- `closed_book` — evergreen topics that don't require current information
-- `hybrid` — evergreen topics that benefit from current information
-- `open_book` — topics that depend heavily on current events or changing information
-
-If research is required, the router generates targeted search queries.
-
----
-
-### 2. Research
-
-For research-based topics, the system uses **Tavily** to search the web.
-
-Multiple search queries can produce multiple candidate sources.
-
-The system then:
-
-1. Collects the search results.
-2. Removes duplicate URLs.
-3. Scores sources based on relevance and authority.
-4. Selects the most useful sources.
-5. Sends **at most 12 selected sources** to the evidence synthesizer.
-
-This keeps the evidence passed to the LLM focused instead of sending the entire search result set.
-
----
-
-### 3. Orchestrator
-
-The orchestrator uses Gemini to create a structured blog plan.
-
-The plan contains **exactly 5 sections**.
-
-Each section contains information such as:
-
-- Section title
-- Goal
-- Key bullets
-- Target word count
-- Section type
-- Research requirements
-- Citation requirements
-- Code requirements
-
-This gives the writing workers a clear structure to follow.
-
----
-
-### 4. Workers
-
-The five workers generate the five individual blog sections.
-
-Each worker receives:
-
-- The blog topic
-- The overall blog plan
-- Its assigned section
-- Writing requirements
-- Relevant evidence
-
-The workers generate Markdown content for their respective sections.
-
-The workers currently run **sequentially** to reduce API rate-limit problems when using the Gemini API.
-
----
-
-### 5. Reducer
-
-The reducer takes all five generated sections and puts them back into the correct order.
-
-It then creates the final Markdown document:
+Possible outcomes include:
 
 ```text
-# Blog Title
+Research required
+```
 
-## Section 1
+or:
 
-...
+```text
+No research required
+```
 
-## Section 2
+This allows the system to avoid unnecessary web searches for topics that do not require external evidence.
 
-...
+---
 
-## Section 3
+## 2. Research
 
-...
+When research is required, the system uses **Tavily** to search the web.
 
-## Section 4
+The research stage:
 
-...
+- Generates search queries
+- Collects search results
+- Extracts useful evidence
+- Captures source metadata
+- Applies deterministic source-authority scoring
+- Selects the strongest evidence for the writing process
 
-## Section 5
+The system prioritizes sources based on factors such as:
+
+- Domain authority
+- Source reputation
+- Publication date
+- Availability of useful snippets
+
+---
+
+## 3. Evidence Collection
+
+Collected research is converted into structured evidence.
+
+Each evidence item can contain information such as:
+
+```text
+Title
+URL
+Domain
+Snippet
+Published date
+Authority score
+```
+
+This evidence is passed to later stages so the blog can be grounded in the collected information.
+
+---
+
+## 4. Blog Planning
+
+The orchestrator creates a structured blog plan.
+
+The plan contains:
+
+- Blog title
+- Blog section tasks
+- Section headings
+- Section descriptions
+- Required coverage
+
+The number of sections is determined dynamically by the generated plan and is typically **5–7 sections**, depending on the topic.
+
+This allows the blog structure to adapt to the complexity of the subject.
+
+---
+
+## 5. Blog Generation
+
+The workers generate the individual blog sections defined by the orchestrator's plan.
+
+The sections are generated **sequentially**, allowing later sections to use relevant context from previously generated sections.
+
+Internally, the backend processes individual section-generation tasks.
+
+However, the Streamlit interface intentionally presents this as a single user-facing stage:
+
+```text
+✍️ Generating the blog
+```
+
+Individual section progress is not displayed in the frontend.
+
+This keeps the user interface simple and avoids exposing internal worker implementation details.
+
+---
+
+## 6. Blog Finalization
+
+After all planned sections have been generated, the reducer combines them into the final blog.
+
+The reducer is responsible for producing the final Markdown output.
+
+The final result is then displayed directly inside Streamlit.
+
+---
+
+# 📊 Streamlit Interface
+
+The frontend provides stage-level workflow progress:
+
+```text
+✅ 🔎 Analyzing the topic
+✅ 🌐 Collecting evidence
+✅ 🧠 Creating the blog plan
+⏳ ✍️ Generating the blog
+○  ✨ Finalizing the blog
+```
+
+When the workflow finishes:
+
+```text
+✅ 🔎 Analyzing the topic
+✅ 🌐 Collecting evidence
+✅ 🧠 Creating the blog plan
+✅ ✍️ Generating the blog
+✅ ✨ Finalizing the blog
+```
+
+The interface also displays:
+
+- Live activity messages
+- Number of evidence sources collected
+- Number of planned blog sections
+- Final generated blog
+- Markdown download button
+
+---
+
+# 📥 Markdown Download
+
+The generated Markdown content is kept **in memory during the workflow**.
+
+The backend does not automatically create a `blog.md` file in the project directory.
+
+Instead, the user can download the generated Markdown only by clicking:
+
+```text
+⬇️ Download Markdown File
+```
+
+The filename is automatically derived from the blog's Markdown title when possible.
+
+For example:
+
+```text
+# How LangGraph Works
 
 ...
 ```
 
-The resulting Markdown file can then be downloaded from the Streamlit interface.
+can result in a filename such as:
+
+```text
+How LangGraph Works.md
+```
+
+Invalid filename characters are removed to keep the generated filename safe.
 
 ---
 
-## 🛠️ Tech Stack
-
-| Technology        | Purpose                                   |
-| ----------------- | ----------------------------------------- |
-| **Python**        | Core programming language                 |
-| **LangGraph**     | Workflow orchestration                    |
-| **LangChain**     | LLM and tool integration                  |
-| **Google Gemini** | Planning, research synthesis, and writing |
-| **Tavily**        | Web research                              |
-| **Streamlit**     | Frontend/UI                               |
-| **Pydantic**      | Structured data validation                |
-| **python-dotenv** | Environment variable management           |
-
----
-
-## 📁 Project Structure
+# 🧩 Project Structure
 
 ```text
 Blog_Writing_Agent/
 │
-├── backend.py
+├── backend_x.py
 ├── frontend.py
 ├── requirements.txt
 ├── .gitignore
-└── .env
+├── .env
+└── README.md
 ```
 
-### `backend.py`
+### `backend_x.py`
 
-Contains the complete LangGraph workflow, including:
+Contains the complete LangGraph backend.
 
+Responsible for:
+
+- State definitions
+- Pydantic models
 - Router
 - Research
-- Evidence selection
+- Evidence processing
+- Source scoring
 - Orchestrator
 - Workers
 - Reducer
-- Markdown generation
+- Graph construction
+- Streaming workflow execution
 
 ### `frontend.py`
 
-Contains the Streamlit interface used to:
+Contains the Streamlit interface.
 
-- Enter the blog topic
-- Start the workflow
-- Display workflow progress
-- Display the generated blog
-- Download the final Markdown file
+Responsible for:
+
+- Topic input
+- Workflow progress
+- Live activity
+- Final blog rendering
+- Markdown download
 
 ### `requirements.txt`
 
-Contains the Python dependencies required to run the project.
+Contains the Python dependencies required by the project.
 
 ### `.env`
 
 Stores API credentials locally.
 
-**This file should never be committed to GitHub.**
+This file should **never be committed to GitHub**.
+
+### `.gitignore`
+
+Prevents sensitive files and unnecessary generated files from being committed.
+
+### `README.md`
+
+Project documentation and setup instructions.
 
 ---
 
-## ⚙️ Installation
+# ⚙️ Technologies Used
 
-### 1. Clone the repository
+| Technology    | Purpose                         |
+| ------------- | ------------------------------- |
+| Python        | Core programming language       |
+| LangGraph     | Workflow orchestration          |
+| LangChain     | LLM and tool integration        |
+| OpenAI        | Language model                  |
+| Tavily        | Web research                    |
+| Pydantic      | Structured data validation      |
+| Streamlit     | Frontend interface              |
+| python-dotenv | Environment variable management |
 
-```bash
-git clone https://github.com/Ayushkr240/Blog-Writing-Agent.git
+---
+
+# 🔐 Environment Variables
+
+Create a `.env` file in the project root:
+
+```env
+OPENAI_API_KEY=your_openai_api_key
+TAVILY_API_KEY=your_tavily_api_key
 ```
 
-### 2. Create a virtual environment
+Do not commit your `.env` file.
+
+Make sure `.env` is included in `.gitignore`.
+
+---
+
+# 📦 Installation
+
+## 1. Clone the repository
+
+```bash
+git clone <your-repository-url>
+```
+
+Move into the project directory:
+
+```bash
+cd Blog_Writing_Agent
+```
+
+---
+
+## 2. Create a virtual environment
 
 Windows:
 
@@ -283,9 +411,16 @@ Activate it:
 venv\Scripts\activate
 ```
 
+macOS/Linux:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
 ---
 
-### 3. Install dependencies
+## 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -293,147 +428,234 @@ pip install -r requirements.txt
 
 ---
 
-## 🔑 Environment Variables
+## 4. Configure environment variables
 
-Create a `.env` file in the project root:
+Create `.env`:
 
 ```env
-GOOGLE_API_KEY=your_google_api_key
+OPENAI_API_KEY=your_openai_api_key
 TAVILY_API_KEY=your_tavily_api_key
 ```
 
-Replace the placeholder values with your actual API keys.
-
-### ⚠️ Security
-
-Never commit your `.env` file.
-
-The project `.gitignore` is configured to exclude it from Git.
-
 ---
 
-## ▶️ Running the Application
+# ▶️ Running the Application
 
-Start the Streamlit application:
+Start the Streamlit frontend with:
 
 ```bash
 streamlit run frontend.py
 ```
 
-Streamlit will provide a local URL, usually similar to:
-
-```text
-http://localhost:8501
-```
-
-Open it in your browser.
+Streamlit will provide a local URL where the application can be opened in your browser.
 
 ---
 
-## 💡 Example
+# 🧪 Example
 
 Enter a topic such as:
 
 ```text
-How does LangGraph work?
+How LangGraph works with parallel agents
 ```
 
-The agent will move through the workflow:
+The workflow may proceed as:
+
+```text
+🔎 Analyzing the topic
+        ↓
+🌐 Collecting evidence
+        ↓
+🧠 Creating the blog plan
+        ↓
+✍️ Generating the blog
+        ↓
+✨ Finalizing the blog
+        ↓
+🎉 Blog generated successfully!
+```
+
+The resulting Markdown blog is displayed in the application and can be downloaded using the download button.
+
+---
+
+# 🧠 Design Philosophy
+
+The project follows a **specialized-agent architecture** rather than relying on one large generation call.
+
+Each stage has a specific responsibility:
+
+```text
+Router
+  ↓
+Decides what workflow is required
+
+Research
+  ↓
+Collects external evidence when necessary
+
+Orchestrator
+  ↓
+Creates the blog structure
+
+Workers
+  ↓
+Generate the planned sections
+
+Reducer
+  ↓
+Combines and finalizes the blog
+```
+
+This separation improves:
+
+- Maintainability
+- Debuggability
+- Control over generation
+- Research grounding
+- Workflow transparency
+- Extensibility
+
+---
+
+# 🔍 Source Quality
+
+The research pipeline uses deterministic source scoring before evidence reaches the final writing process.
+
+High-authority domains receive stronger scores, including sources such as:
+
+```text
+.gov
+.edu
+github.com
+arxiv.org
+openai.com
+python.org
+pytorch.org
+tensorflow.org
+microsoft.com
+```
+
+Reputable publications are also given additional authority:
+
+```text
+Reuters
+AP News
+BBC
+The New York Times
+TechCrunch
+The Verge
+Wired
+Nature
+Ars Technica
+```
+
+Domain matching is boundary-aware so that unrelated domains cannot accidentally receive authority simply because their names end with a trusted domain string.
+
+For example:
+
+```text
+github.com
+docs.github.com
+```
+
+are recognized as valid GitHub domains, while:
+
+```text
+notgithub.com
+github.com.evil.com
+```
+
+are not treated as GitHub.
+
+---
+
+# 🛡️ Reliability and Error Handling
+
+The system includes defensive handling for:
+
+- Invalid LLM responses
+- Missing structured fields
+- Malformed research results
+- Unexpected plan formats
+- Missing evidence
+- Empty final output
+- Invalid Markdown filenames
+- Workflow exceptions
+
+The frontend also exposes technical errors inside a collapsible Streamlit section when a workflow failure occurs.
+
+---
+
+# 🚧 Future Improvements
+
+Possible future improvements include:
+
+- Parallel section generation
+- Improved research deduplication
+- Citation insertion inside generated blogs
+- Better source ranking
+- Persistent blog history
+- Blog editing inside the UI
+- Multiple output formats
+- User-selectable writing styles
+- Custom blog length controls
+- Additional research providers
+- Streaming section-generation feedback
+- Deployment to a cloud platform
+- Authentication and multi-user support
+
+---
+
+# 👨‍💻 Project Status
+
+The project currently supports the complete workflow:
 
 ```text
 Topic
   ↓
 Routing
   ↓
-Research (if required)
+Conditional Research
   ↓
 Evidence Collection
   ↓
 Blog Planning
   ↓
-Writing Section 1
+Blog Generation
   ↓
-Writing Section 2
+Blog Finalization
   ↓
-Writing Section 3
-  ↓
-Writing Section 4
-  ↓
-Writing Section 5
-  ↓
-Finalizing Blog
-  ↓
-Download Markdown
+Markdown Download
 ```
 
-The final result is a complete `.md` blog file.
+The backend and frontend are separated so that the LangGraph workflow can evolve independently from the Streamlit interface.
 
 ---
 
-## 🧠 Why LangGraph?
+# 📄 License
 
-LangGraph is used to represent the blog-generation process as a structured workflow rather than making one large LLM call.
+Add your preferred license here.
 
-This makes it possible to separate responsibilities:
+For example:
 
 ```text
-Router        → Decides what needs to happen
-Research      → Collects evidence
-Orchestrator  → Plans the blog
-Workers       → Write sections
-Reducer       → Produces the final document
+MIT License
 ```
 
-This modular architecture makes the system easier to understand, debug, and extend.
-
 ---
 
-## 🔮 Future Improvements
+# ⭐ Acknowledgements
 
-Possible future improvements include:
-
-- [ ] Support for multiple blog styles
-- [ ] User-controlled blog length
-- [ ] Custom audience selection
-- [ ] SEO keyword generation
-- [ ] Automatic meta descriptions
-- [ ] Automatic title generation
-- [ ] Image generation for blog posts
-- [ ] More advanced source-quality evaluation
-- [ ] Citation verification
-- [ ] Blog history
-- [ ] Export to PDF/DOCX
-- [ ] Streaming individual worker outputs
-- [ ] Persistent LangGraph state
-- [ ] Deployment to Streamlit Cloud
-
----
-
-## ⚠️ Notes
-
-This project requires valid **Google Gemini** and **Tavily** API credentials for its full research and generation workflow.
-
-Research results depend on the quality and availability of external sources returned by Tavily.
-
-The system limits the evidence passed to the synthesis stage to **12 sources** to keep the research context focused and reduce unnecessary token usage.
-
----
-
-## 👨‍💻 Author
-
-**Ayush Kumar**
-
-Built as an AI-agent project exploring:
+Built using:
 
 - LangGraph
 - LangChain
-- LLM workflows
-- Agentic systems
-- Web research
-- AI-assisted content generation
+- OpenAI
+- Tavily
+- Streamlit
+- Pydantic
 
----
+```
 
-## ⭐ If you find this project useful
-
-Consider giving the repository a ⭐ on GitHub!
+```

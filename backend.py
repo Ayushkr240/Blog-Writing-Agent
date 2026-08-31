@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import TypedDict, List, Annotated, Literal, Optional
 import operator
 import re
@@ -43,7 +42,8 @@ MAX_SNIPPET_CHARS = 900
 
 # Sequential workers are intentional. Five simultaneous Gemini
 # calls can cause provider-side rate-limit spikes.
-WORKER_COUNT = 5
+MIN_SECTIONS = 5
+MAX_SECTIONS = 7
 
 
 # ============================================================
@@ -162,10 +162,13 @@ class Plan(BaseModel):
     )
 
     tasks: List[Task] = Field(
-        ...,
-        min_length=5,
-        max_length=5,
-        description="Exactly 5 sections/tasks for the blog.",
+    ...,
+    min_length=MIN_SECTIONS,
+    max_length=MAX_SECTIONS,
+    description=(
+        "Dynamically chosen blog sections/tasks. "
+        "Must contain between 5 and 7 sections."
+    ),
     )
 
 
@@ -514,9 +517,41 @@ def _tavily_search(
     return normalized
 
 
+
 # ============================================================
 # 9. DETERMINISTIC SOURCE RANKING
 # ============================================================
+
+def _domain_matches(
+    domain: str,
+    allowed_domain: str,
+) -> bool:
+    """
+    Return True only when the domain is exactly the allowed
+    domain or is a legitimate subdomain of it.
+
+    Examples:
+
+    github.com            -> True
+    docs.github.com       -> True
+    notgithub.com         -> False
+    github.com.evil.com   -> False
+    """
+
+    domain = domain.lower().strip(".")
+    allowed_domain = (
+        allowed_domain
+        .lower()
+        .strip(".")
+    )
+
+    return (
+        domain == allowed_domain
+        or domain.endswith(
+            "." + allowed_domain
+        )
+    )
+
 
 def _source_authority_score(item: dict) -> int:
     """
@@ -526,9 +561,14 @@ def _source_authority_score(item: dict) -> int:
     best ~10–15 sources ever reach the LLM.
     """
 
-    url = item.get("url", "")
+    url = item.get(
+        "url",
+        "",
+    )
 
-    domain = _domain_from_url(url)
+    domain = _domain_from_url(
+        url
+    )
 
     score = 0
 
@@ -563,26 +603,55 @@ def _source_authority_score(item: dict) -> int:
         "arstechnica.com",
     )
 
+    # --------------------------------------------------------
+    # High-authority sources
+    # --------------------------------------------------------
+
     if any(
-        domain.endswith(suffix)
+        (
+            domain.endswith(suffix)
+            if suffix.startswith(".")
+            else _domain_matches(
+                domain,
+                suffix,
+            )
+        )
         for suffix in high_authority_domains
     ):
         score += 8
 
+    # --------------------------------------------------------
+    # Reputable sources
+    # --------------------------------------------------------
+
     if any(
-        domain.endswith(suffix)
+        _domain_matches(
+            domain,
+            suffix,
+        )
         for suffix in reputable_domains
     ):
         score += 5
 
-    if item.get("published_at"):
+    # --------------------------------------------------------
+    # Freshness
+    # --------------------------------------------------------
+
+    if item.get(
+        "published_at"
+    ):
         score += 1
 
-    if item.get("snippet"):
+    # --------------------------------------------------------
+    # Useful snippet
+    # --------------------------------------------------------
+
+    if item.get(
+        "snippet"
+    ):
         score += 2
 
     return score
-
 
 def _rank_and_select_sources(
     raw_results: List[dict],
@@ -845,19 +914,20 @@ technical blog post.
 
 HARD REQUIREMENTS:
 
-- Create EXACTLY 5 sections/tasks.
-- Every task must include:
-    1. id
-    2. title
-    3. goal
-    4. 3 concrete bullets
-    5. target word count
-    6. section_type
-    7. brief
-    8. tags
-    9. requires_research
-    10. requires_citations
-    11. requires_code
+- Create between 5 and 7 sections/tasks.
+- YOU decide whether the blog needs 5, 6, or 7 sections.
+- Choose the number based on the complexity and scope of
+  the user's topic and the available evidence.
+- Do NOT use a fixed section template.
+- The section titles and subtopics must be specifically
+  derived from the user's topic.
+- Avoid redundant or overlapping sections.
+- Every section should have a distinct purpose.
+- Prefer fewer sections when the topic can be covered
+  completely and clearly in 5 sections.
+- Use 6 or 7 sections when the topic genuinely benefits
+  from additional conceptual, practical, comparative,
+  troubleshooting, or advanced coverage.
 
 QUALITY BAR:
 
@@ -922,20 +992,36 @@ conclusion
 
 Use "common_mistakes" exactly once.
 
-Prefer using "intro" for section 1 and "conclusion" for
-section 5 when appropriate.
+Prefer using "intro" for the first section and "conclusion"
+for the final section when appropriate.
+
+The final section number is dynamic because the plan may contain
+5, 6, or 7 sections.
 
 Return only the Plan fields.
 """
 
 
 def validate_plan(plan: Plan) -> Plan:
+    """
+    Validate the orchestrator's dynamic blog plan.
 
-    if len(plan.tasks) != 5:
+    The orchestrator may choose 5, 6, or 7 sections,
+    but never fewer than 5 or more than 7.
+    """
+
+    task_count = len(plan.tasks)
+
+    if not (
+        MIN_SECTIONS
+        <= task_count
+        <= MAX_SECTIONS
+    ):
 
         raise ValueError(
-            f"Expected exactly 5 tasks, "
-            f"got {len(plan.tasks)}"
+            f"Plan must contain between "
+            f"{MIN_SECTIONS} and {MAX_SECTIONS} sections, "
+            f"got {task_count}"
         )
 
     task_ids = [
@@ -947,6 +1033,20 @@ def validate_plan(plan: Plan) -> Plan:
 
         raise ValueError(
             "Task IDs must be unique."
+        )
+
+    expected_ids = list(
+        range(
+            1,
+            task_count + 1,
+        )
+    )
+
+    if sorted(task_ids) != expected_ids:
+
+        raise ValueError(
+            "Task IDs must be sequential starting from 1. "
+            f"Expected {expected_ids}, got {sorted(task_ids)}"
         )
 
     common_mistakes_count = sum(
@@ -1263,12 +1363,14 @@ def workers_node(
     state: ChatState,
 ) -> dict:
     """
-    Generate all five sections sequentially.
+    Generate all planned sections sequentially.
 
-    This replaces LangGraph Send/fan-out so that five Gemini
-    requests are NOT launched concurrently.
+    The orchestrator decides whether there are 5, 6, or 7
+    sections. Workers then process exactly those tasks.
 
-    The worker count remains exactly five.
+    Sequential execution is intentional to avoid launching
+    multiple Gemini requests concurrently and hitting
+    provider-side rate limits.
     """
 
     plan = state.get(
@@ -1283,11 +1385,18 @@ def workers_node(
 
     tasks = plan.tasks
 
-    if len(tasks) != WORKER_COUNT:
+    task_count = len(tasks)
+
+    if not (
+        MIN_SECTIONS
+        <= task_count
+        <= MAX_SECTIONS
+    ):
 
         raise ValueError(
-            f"Expected {WORKER_COUNT} tasks, "
-            f"got {len(tasks)}"
+            f"Expected between "
+            f"{MIN_SECTIONS} and {MAX_SECTIONS} tasks, "
+            f"got {task_count}"
         )
 
     evidence = state.get(
@@ -1359,8 +1468,8 @@ def reducer(
     state: ChatState,
 ) -> dict:
     """
-    Combine the five worker sections in task-ID order and
-    create the final Markdown file.
+    Combine all dynamically generated worker sections in
+    task-ID order and return the final Markdown content.
     """
 
     plan = state.get(
@@ -1394,15 +1503,6 @@ def reducer(
     final_md = (
         f"# {plan.blog_title}\n\n"
         f"{body}\n"
-    )
-
-    filename = (
-        f"{safe_filename(plan.blog_title)}.md"
-    )
-
-    Path(filename).write_text(
-        final_md,
-        encoding="utf-8",
     )
 
     return {
@@ -1542,11 +1642,9 @@ def run(topic: str):
 
 def run_stream(topic: str):
     """
-    Stream LangGraph node updates.
-
-    The graph itself is streamed at node level.
-    The five worker LLM calls are intentionally sequential
-    inside the workers node.
+    The worker LLM calls are intentionally sequential
+    inside the workers node. The number of calls is determined
+    by the orchestrator's 5–7 section plan.
     """
 
     topic = str(
