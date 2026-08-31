@@ -293,7 +293,7 @@ Invalid filename characters are removed to keep the generated filename safe.
 ```text
 Blog_Writing_Agent/
 │
-├── backend_x.py
+├── backend.py
 ├── frontend.py
 ├── requirements.txt
 ├── .gitignore
@@ -301,7 +301,7 @@ Blog_Writing_Agent/
 └── README.md
 ```
 
-### `backend_x.py`
+### `backend.py`
 
 Contains the complete LangGraph backend.
 
