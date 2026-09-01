@@ -1,8 +1,8 @@
 # ✍️ Blog Writing Agent
 
-A multi-agent AI system that researches a topic, gathers supporting evidence, creates a structured blog plan, generates the blog sections, and combines everything into a polished final Markdown blog.
+A multi-agent AI system that researches a topic, gathers supporting evidence, creates a structured blog plan, generates the blog sections, combines everything into a polished final Markdown blog, and allows the user to export the generated blog in multiple formats.
 
-Built using **LangGraph**, **LangChain**, **OpenAI**, **Tavily**, and **Streamlit**.
+Built using **LangGraph**, **LangChain**, **OpenAI**, **Tavily**, **Streamlit**, **Pydantic**, and **LangSmith**.
 
 ---
 
@@ -18,9 +18,18 @@ Instead of asking a single LLM to directly write an entire blog, the system divi
 4. Blog planning
 5. Section generation
 6. Blog finalization
-7. Markdown download
+7. Multi-format export
+8. Workflow observability with LangSmith
 
-The system can determine whether web research is required, collect supporting sources when necessary, create a structured **5–7 section blog plan**, generate the planned sections sequentially, and finally combine them into a polished Markdown document.
+The system can determine whether web research is required, collect supporting sources when necessary, create a structured blog plan, generate the planned sections sequentially, and finally combine them into a polished Markdown document.
+
+The generated blog can then be exported as:
+
+- Markdown
+- Plain Text
+- HTML
+- Word Document
+- PDF
 
 ---
 
@@ -37,11 +46,18 @@ The system can determine whether web research is required, collect supporting so
 - 📊 **Live workflow stage progress in Streamlit**
 - 📋 **Live activity updates**
 - 📖 **Final Markdown blog rendering**
-- 📥 **Download generated blog as `.md`**
+- 📥 **Multi-format blog export**
+- 📄 **Markdown (`.md`) export**
+- 📝 **Plain Text (`.txt`) export**
+- 🌐 **HTML (`.html`) export**
+- 📘 **Word (`.docx`) export**
+- 📕 **PDF (`.pdf`) export**
+- 💾 **Session-state based generated blog persistence**
 - 🔐 **Environment-variable based API key management**
 - 🛡️ **Robust parsing and fallback handling**
 - 🧩 **Pydantic-based structured state**
 - 🧠 **Context-aware blog generation using research evidence**
+- 🔍 **LangSmith observability and workflow tracing**
 
 ---
 
@@ -60,7 +76,7 @@ The system uses a **StateGraph** to coordinate the different stages of the blog-
                     │                 │
                     │ Analyze topic   │
                     │ Decide whether  │
-                    │ research needed│
+                    │ research needed │
                     └────────┬────────┘
                              │
                    ┌─────────┴──────────┐
@@ -106,7 +122,15 @@ The system uses a **StateGraph** to coordinate the different stages of the blog-
                              ▼
                     ┌─────────────────┐
                     │      END        │
-                    └─────────────────┘
+                    └────────┬────────┘
+                             │
+                             ▼
+                 ┌──────────────────────┐
+                 │   Exporter Layer     │
+                 │                      │
+                 │ MD / TXT / HTML      │
+                 │ DOCX / PDF           │
+                 └──────────────────────┘
 ```
 
 ---
@@ -220,7 +244,9 @@ After all planned sections have been generated, the reducer combines them into t
 
 The reducer is responsible for producing the final Markdown output.
 
-The final result is then displayed directly inside Streamlit.
+The final result is then stored in Streamlit session state and displayed directly inside the application.
+
+Using session state allows the generated blog to remain available across normal Streamlit UI reruns, such as changing the selected export format.
 
 ---
 
@@ -252,39 +278,186 @@ The interface also displays:
 - Number of evidence sources collected
 - Number of planned blog sections
 - Final generated blog
-- Markdown download button
+- Export format selector
+- Download button
+
+The observability information is **not displayed in the Streamlit UI**. LangSmith is used separately for tracing and inspecting workflow execution.
 
 ---
 
-# 📥 Markdown Download
+# 📥 Blog Export
 
-The generated Markdown content is kept **in memory during the workflow**.
+The generated Markdown blog can be exported into multiple formats.
 
-The backend does not automatically create a `blog.md` file in the project directory.
-
-Instead, the user can download the generated Markdown only by clicking:
+The export functionality is implemented separately from the Streamlit frontend through:
 
 ```text
-⬇️ Download Markdown File
+exporters.py
 ```
 
-The filename is automatically derived from the blog's Markdown title when possible.
+This keeps file-generation logic separated from UI logic.
 
-For example:
+The available formats are:
+
+| Format     | Extension | Purpose                          |
+| ---------- | --------- | -------------------------------- |
+| Markdown   | `.md`     | Original Markdown blog           |
+| Plain Text | `.txt`    | Simple text version              |
+| HTML       | `.html`   | Browser-ready web document       |
+| Word       | `.docx`   | Editable Microsoft Word document |
+| PDF        | `.pdf`    | Portable document format         |
+
+The user selects the desired format from the Streamlit interface:
 
 ```text
-# How LangGraph Works
+Choose export format
 
-...
+[ Markdown (.md) ▼ ]
 ```
 
-can result in a filename such as:
+The corresponding exporter is then used to generate the downloadable file.
+
+---
+
+## 📄 Markdown Export
+
+The original Markdown content is exported as:
 
 ```text
-How LangGraph Works.md
+Blog Title.md
 ```
 
-Invalid filename characters are removed to keep the generated filename safe.
+---
+
+## 📝 Plain Text Export
+
+Markdown formatting is converted into a clean plain-text representation.
+
+The resulting file uses:
+
+```text
+Blog Title.txt
+```
+
+---
+
+## 🌐 HTML Export
+
+The Markdown blog is converted into a standalone HTML document.
+
+The generated HTML includes:
+
+- HTML structure
+- Metadata
+- Responsive viewport configuration
+- Basic typography
+- Heading styles
+- Lists
+- Code blocks
+- Tables
+- Links
+- Images
+
+The resulting file can be opened directly in a browser.
+
+Example:
+
+```text
+Blog Title.html
+```
+
+---
+
+## 📘 Word Export
+
+The blog can be converted into a Microsoft Word document using `python-docx`.
+
+The resulting document uses:
+
+```text
+Blog Title.docx
+```
+
+This makes the generated blog editable in Word-compatible applications.
+
+---
+
+## 📕 PDF Export
+
+The blog can also be converted into a PDF document using `reportlab`.
+
+The resulting document uses:
+
+```text
+Blog Title.pdf
+```
+
+---
+
+# 💾 Blog Persistence During UI Interaction
+
+Streamlit reruns the application whenever certain widgets change.
+
+To prevent the generated blog from disappearing when the user changes the export format, the final Markdown content is stored in:
+
+```python
+st.session_state.final_md
+```
+
+The architecture is therefore:
+
+```text
+Generate Blog
+      ↓
+final_md
+      ↓
+st.session_state.final_md
+      ↓
+Streamlit rerun
+      ↓
+Blog remains available
+      ↓
+Change export format
+      ↓
+Generate selected export
+```
+
+This allows the user to switch between:
+
+```text
+Markdown
+TXT
+HTML
+DOCX
+PDF
+```
+
+without losing the generated blog.
+
+---
+
+# 🔍 Observability with LangSmith
+
+The project integrates **LangSmith** for workflow observability.
+
+LangSmith provides a separate environment where the execution of the LangGraph workflow can be inspected.
+
+It can be used to understand:
+
+- Workflow execution
+- Graph runs
+- Individual node execution
+- LLM calls
+- Tool calls
+- Execution traces
+- Errors and failures
+- Latency
+- Token usage
+- Intermediate execution behavior
+
+The observability layer is intentionally **not exposed in the Streamlit interface**.
+
+The application UI remains focused on the blog-writing experience while LangSmith provides the developer-facing monitoring and debugging layer.
 
 ---
 
@@ -295,6 +468,7 @@ Blog_Writing_Agent/
 │
 ├── backend.py
 ├── frontend.py
+├── exporters.py
 ├── requirements.txt
 ├── .gitignore
 ├── .env
@@ -329,7 +503,22 @@ Responsible for:
 - Workflow progress
 - Live activity
 - Final blog rendering
-- Markdown download
+- Session-state persistence
+- Export format selection
+- File downloads
+
+### `exporters.py`
+
+Contains the blog export functionality.
+
+Responsible for:
+
+- Markdown export
+- Plain-text export
+- HTML export
+- DOCX export
+- PDF export
+- Export filename generation
 
 ### `requirements.txt`
 
@@ -362,6 +551,10 @@ Project documentation and setup instructions.
 | Tavily        | Web research                    |
 | Pydantic      | Structured data validation      |
 | Streamlit     | Frontend interface              |
+| LangSmith     | Observability and tracing       |
+| Markdown      | Markdown-to-HTML conversion     |
+| python-docx   | Word document generation        |
+| ReportLab     | PDF generation                  |
 | python-dotenv | Environment variable management |
 
 ---
@@ -373,6 +566,9 @@ Create a `.env` file in the project root:
 ```env
 OPENAI_API_KEY=your_openai_api_key
 TAVILY_API_KEY=your_tavily_api_key
+LANGSMITH_API_KEY=your_langsmith_api_key
+LANGSMITH_TRACING=true
+LANGSMITH_PROJECT=your_project_name
 ```
 
 Do not commit your `.env` file.
@@ -426,6 +622,14 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+The export functionality requires:
+
+```text
+Markdown
+python-docx
+reportlab
+```
+
 ---
 
 ## 4. Configure environment variables
@@ -433,8 +637,11 @@ pip install -r requirements.txt
 Create `.env`:
 
 ```env
-GOOGLE_API_KEY=your_api_key
+OPENAI_API_KEY=your_openai_api_key
 TAVILY_API_KEY=your_tavily_api_key
+LANGSMITH_API_KEY=your_langsmith_api_key
+LANGSMITH_TRACING=true
+LANGSMITH_PROJECT=your_project_name
 ```
 
 ---
@@ -475,7 +682,19 @@ The workflow may proceed as:
 🎉 Blog generated successfully!
 ```
 
-The resulting Markdown blog is displayed in the application and can be downloaded using the download button.
+The resulting blog is displayed in the application.
+
+The user can then select an export format:
+
+```text
+Markdown
+Plain Text
+HTML
+Word Document
+PDF
+```
+
+and download the generated blog in the selected format.
 
 ---
 
@@ -505,6 +724,10 @@ Generate the planned sections
 Reducer
   ↓
 Combines and finalizes the blog
+
+Exporters
+  ↓
+Convert the final blog into multiple formats
 ```
 
 This separation improves:
@@ -515,6 +738,7 @@ This separation improves:
 - Research grounding
 - Workflow transparency
 - Extensibility
+- Reusability of generated content
 
 ---
 
@@ -582,6 +806,7 @@ The system includes defensive handling for:
 - Empty final output
 - Invalid Markdown filenames
 - Workflow exceptions
+- Export generation errors
 
 The frontend also exposes technical errors inside a collapsible Streamlit section when a workflow failure occurs.
 
@@ -589,15 +814,14 @@ The frontend also exposes technical errors inside a collapsible Streamlit sectio
 
 # 🚧 Future Improvements
 
-Possible future improvements include:
+Planned or possible future improvements include:
 
-- Parallel section generation
+- Plan approval before blog generation
+- Blog editing and revision stage
+- Persistent generation history
 - Improved research deduplication
 - Citation insertion inside generated blogs
 - Better source ranking
-- Persistent blog history
-- Blog editing inside the UI
-- Multiple output formats
 - User-selectable writing styles
 - Custom blog length controls
 - Additional research providers
@@ -626,22 +850,17 @@ Blog Generation
   ↓
 Blog Finalization
   ↓
-Markdown Download
+Multi-format Export
+  ├── Markdown
+  ├── TXT
+  ├── HTML
+  ├── DOCX
+  └── PDF
+  ↓
+LangSmith Observability
 ```
 
-The backend and frontend are separated so that the LangGraph workflow can evolve independently from the Streamlit interface.
-
----
-
-# 📄 License
-
-Add your preferred license here.
-
-For example:
-
-```text
-MIT License
-```
+The backend, frontend, exporter layer, and observability layer are separated so that each part of the system can evolve independently.
 
 ---
 
@@ -655,7 +874,6 @@ Built using:
 - Tavily
 - Streamlit
 - Pydantic
-
-```
-
-```
+- LangSmith
+- python-docx
+- ReportLab

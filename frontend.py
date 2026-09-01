@@ -1,5 +1,14 @@
 import streamlit as st
+
 from backend import run_stream
+
+from exporters import (
+    export_markdown,
+    export_text,
+    export_html,
+    export_docx,
+    export_pdf,
+)
 
 
 # ============================================================
@@ -95,6 +104,20 @@ st.markdown(
 
 
 # ============================================================
+# SESSION STATE
+# ============================================================
+
+if "final_md" not in st.session_state:
+    st.session_state.final_md = ""
+
+if "evidence_count" not in st.session_state:
+    st.session_state.evidence_count = 0
+
+if "total_sections" not in st.session_state:
+    st.session_state.total_sections = 0
+
+
+# ============================================================
 # INPUT
 # ============================================================
 
@@ -151,10 +174,6 @@ def render_progress(
 
         label = STAGES[stage]
 
-        # ----------------------------------------------------
-        # Determine stage state
-        # ----------------------------------------------------
-
         if stage in completed_stages:
 
             state_class = "stage-done"
@@ -203,7 +222,15 @@ if generate:
         st.stop()
 
     # --------------------------------------------------------
-    # Reset workflow state
+    # Reset state for a NEW generation
+    # --------------------------------------------------------
+
+    st.session_state.final_md = ""
+    st.session_state.evidence_count = 0
+    st.session_state.total_sections = 0
+
+    # --------------------------------------------------------
+    # Local workflow state
     # --------------------------------------------------------
 
     completed_stages = set()
@@ -212,9 +239,6 @@ if generate:
 
     evidence_count = 0
 
-    # The orchestrator determines the number of sections
-    # dynamically. This variable is used only for information
-    # shown to the user.
     total_sections = 0
 
     # --------------------------------------------------------
@@ -268,7 +292,6 @@ if generate:
                 message
             )
 
-            # Display only the latest 8 messages.
             visible = activity_messages[-8:]
 
             activity_placeholder.markdown(
@@ -527,6 +550,16 @@ if generate:
                     "",
                 )
 
+                # ------------------------------------------------
+                # Persist generated blog
+                # ------------------------------------------------
+
+                if final_md:
+
+                    st.session_state.final_md = (
+                        final_md
+                    )
+
                 add_activity(
                     "All sections combined "
                     "and blog finalized."
@@ -545,7 +578,21 @@ if generate:
         if final_md:
 
             # ------------------------------------------------
-            # Ensure every workflow stage is displayed as done
+            # Persist generated blog and metadata
+            # ------------------------------------------------
+
+            st.session_state.final_md = final_md
+
+            st.session_state.evidence_count = (
+                evidence_count
+            )
+
+            st.session_state.total_sections = (
+                total_sections
+            )
+
+            # ------------------------------------------------
+            # Mark all stages complete
             # ------------------------------------------------
 
             render_progress(
@@ -562,118 +609,6 @@ if generate:
 
             st.success(
                 "🎉 Blog generated successfully!"
-            )
-
-            # ------------------------------------------------
-            # Research information
-            # ------------------------------------------------
-
-            if evidence_count:
-
-                st.caption(
-                    f"Research used "
-                    f"{evidence_count} "
-                    f"evidence source(s)."
-                )
-
-            # ------------------------------------------------
-            # Section information
-            # ------------------------------------------------
-
-            if total_sections:
-
-                st.caption(
-                    f"The orchestrator created "
-                    f"a {total_sections}-section blog."
-                )
-
-            st.divider()
-
-            # =================================================
-            # FINAL BLOG
-            # =================================================
-
-            st.subheader(
-                "📖 Final Blog"
-            )
-
-            st.markdown(
-                '<div class="blog-output">',
-                unsafe_allow_html=True,
-            )
-
-            st.markdown(
-                final_md
-            )
-
-            st.markdown(
-                "</div>",
-                unsafe_allow_html=True,
-            )
-
-            st.divider()
-
-            # =================================================
-            # DOWNLOAD
-            # =================================================
-
-            st.subheader(
-                "📥 Download"
-            )
-
-            # Default filename
-            filename = "blog.md"
-
-            # ------------------------------------------------
-            # Extract title from the Markdown H1
-            # ------------------------------------------------
-
-            lines = final_md.splitlines()
-
-            if lines:
-
-                first_line = (
-                    lines[0].strip()
-                )
-
-                if first_line.startswith(
-                    "# "
-                ):
-
-                    title = (
-                        first_line[2:]
-                        .strip()
-                    )
-
-                    # Windows-safe filename characters
-                    invalid_chars = (
-                        '<>:"/\\|?*'
-                    )
-
-                    filename = "".join(
-                        char
-                        for char in title
-                        if char
-                        not in invalid_chars
-                    ).strip()
-
-                    if not filename:
-
-                        filename = "blog"
-
-                    filename += ".md"
-
-            # ------------------------------------------------
-            # Browser download
-            # ------------------------------------------------
-
-            st.download_button(
-                label="⬇️ Download Markdown File",
-                data=final_md,
-                file_name=filename,
-                mime="text/markdown",
-                use_container_width=True,
-                on_click="ignore",
             )
 
         else:
@@ -699,6 +634,145 @@ if generate:
         ):
 
             st.exception(exc)
+
+
+# ============================================================
+# FINAL BLOG
+# ============================================================
+
+if st.session_state.final_md:
+
+    # --------------------------------------------------------
+    # Research information
+    # --------------------------------------------------------
+
+    if st.session_state.evidence_count:
+
+        st.caption(
+            f"Research used "
+            f"{st.session_state.evidence_count} "
+            f"evidence source(s)."
+        )
+
+    # --------------------------------------------------------
+    # Section information
+    # --------------------------------------------------------
+
+    if st.session_state.total_sections:
+
+        st.caption(
+            f"The orchestrator created "
+            f"a {st.session_state.total_sections}-section blog."
+        )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # Blog
+    # --------------------------------------------------------
+
+    st.subheader(
+        "📖 Final Blog"
+    )
+
+    st.markdown(
+        '<div class="blog-output">',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        st.session_state.final_md
+    )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================
+# BLOG EXPORT
+# ============================================================
+
+if st.session_state.final_md:
+
+    st.divider()
+
+    st.subheader(
+        "📥 Export Blog"
+    )
+
+    export_format = st.selectbox(
+        "Choose export format",
+        options=[
+            "Markdown (.md)",
+            "Plain Text (.txt)",
+            "HTML (.html)",
+            "Word Document (.docx)",
+            "PDF (.pdf)",
+        ],
+        key="export_format",
+    )
+
+    # --------------------------------------------------------
+    # Generate export based on selected format
+    # --------------------------------------------------------
+
+    if export_format == "Markdown (.md)":
+
+        export_data, export_filename = export_markdown(
+            st.session_state.final_md
+        )
+
+        export_mime = "text/markdown"
+
+    elif export_format == "Plain Text (.txt)":
+
+        export_data, export_filename = export_text(
+            st.session_state.final_md
+        )
+
+        export_mime = "text/plain"
+
+    elif export_format == "HTML (.html)":
+
+        export_data, export_filename = export_html(
+            st.session_state.final_md
+        )
+
+        export_mime = "text/html"
+
+    elif export_format == "Word Document (.docx)":
+
+        export_data, export_filename = export_docx(
+            st.session_state.final_md
+        )
+
+        export_mime = (
+            "application/vnd.openxmlformats-officedocument"
+            ".wordprocessingml.document"
+        )
+
+    elif export_format == "PDF (.pdf)":
+
+        export_data, export_filename = export_pdf(
+            st.session_state.final_md
+        )
+
+        export_mime = "application/pdf"
+
+    # --------------------------------------------------------
+    # Download button
+    # --------------------------------------------------------
+
+    st.download_button(
+        label=f"⬇️ Download {export_format}",
+        data=export_data,
+        file_name=export_filename,
+        mime=export_mime,
+        use_container_width=True,
+        on_click="ignore",
+    )
 
 
 # ============================================================
