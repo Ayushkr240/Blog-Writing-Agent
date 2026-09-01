@@ -386,7 +386,7 @@ Make sure `.env` is included in `.gitignore`.
 ## 1. Clone the repository
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/Ayushkr240/Blog-Writing-Agent.git
 ```
 
 Move into the project directory:
@@ -433,7 +433,7 @@ pip install -r requirements.txt
 Create `.env`:
 
 ```env
-OPENAI_API_KEY=your_openai_api_key
+GOOGLE_API_KEY=your_api_key
 TAVILY_API_KEY=your_tavily_api_key
 ```
 
