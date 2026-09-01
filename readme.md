@@ -2,7 +2,7 @@
 
 A multi-agent AI system that researches a topic, gathers supporting evidence, creates a structured blog plan, generates the blog sections, combines everything into a polished final Markdown blog, and allows the user to export the generated blog in multiple formats.
 
-Built using **LangGraph**, **LangChain**, **OpenAI**, **Tavily**, **Streamlit**, **Pydantic**, and **LangSmith**.
+Built using **LangGraph**, **LangChain**, **Tavily**, **Streamlit**, **Pydantic**, and **LangSmith**.
 
 ---
 
@@ -547,7 +547,7 @@ Project documentation and setup instructions.
 | Python        | Core programming language       |
 | LangGraph     | Workflow orchestration          |
 | LangChain     | LLM and tool integration        |
-| OpenAI        | Language model                  |
+| Gemini        | Language model                  |
 | Tavily        | Web research                    |
 | Pydantic      | Structured data validation      |
 | Streamlit     | Frontend interface              |
@@ -564,7 +564,7 @@ Project documentation and setup instructions.
 Create a `.env` file in the project root:
 
 ```env
-OPENAI_API_KEY=your_openai_api_key
+GOOGLE_API_KEY=your_api_key
 TAVILY_API_KEY=your_tavily_api_key
 LANGSMITH_API_KEY=your_langsmith_api_key
 LANGSMITH_TRACING=true
@@ -637,7 +637,7 @@ reportlab
 Create `.env`:
 
 ```env
-OPENAI_API_KEY=your_openai_api_key
+GOOGLE_API_KEY=your_api_key
 TAVILY_API_KEY=your_tavily_api_key
 LANGSMITH_API_KEY=your_langsmith_api_key
 LANGSMITH_TRACING=true
@@ -870,7 +870,7 @@ Built using:
 
 - LangGraph
 - LangChain
-- OpenAI
+- Google Gemini
 - Tavily
 - Streamlit
 - Pydantic
