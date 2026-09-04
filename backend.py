@@ -11,6 +11,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_community.tools.tavily_search import TavilySearchResults
 
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Send
 
 
 # ============================================================
@@ -29,10 +30,10 @@ MODEL_NAME = "gemini-3.1-flash-lite"
 # IMPORTANT:
 # Only this many useful sources are sent to the evidence
 # synthesizer and later writing stages.
-MAX_EVIDENCE_SOURCES = 12
+MAX_EVIDENCE_SOURCES = 8
 
-# Research breadth. We can collect more than 12 raw results,
-# rank them locally, and only send the best 12 to Gemini.
+# Research breadth. We can collect more than 8 raw results,
+# rank them locally, and only send the best 8 to Gemini.
 MAX_RESEARCH_QUERIES = 10
 TAVILY_RESULTS_PER_QUERY = 4
 
@@ -40,8 +41,10 @@ TAVILY_RESULTS_PER_QUERY = 4
 # large.
 MAX_SNIPPET_CHARS = 900
 
-# Sequential workers are intentional. Five simultaneous Gemini
-# calls can cause provider-side rate-limit spikes.
+# The worker graph uses LangGraph fan-out so the independent
+# section-generation calls can run concurrently. The planner
+# is capped at 5–7 sections, which stays below the user's
+# stated 15 RPM Gemini request limit for one generation batch.
 MIN_SECTIONS = 5
 MAX_SECTIONS = 7
 
@@ -70,21 +73,21 @@ class Task(BaseModel):
     title: str
 
     goal: str = Field(
-        ...,
-        description=(
-            "One sentence describing what the reader should "
-            "be able to do or understand after this section."
-        ),
+    ...,
+    description=(
+        "The single primary purpose of this section. "
+        "It must be clearly distinct from the purpose of every other section."
+    ),
     )
 
     bullets: List[str] = Field(
-        ...,
-        min_length=3,
-        max_length=6,
-        description=(
-            "3–6 concrete, non-overlapping subpoints "
-            "to cover in this section."
-        ),
+    ...,
+    description=(
+        "3–6 concrete pieces of information that are exclusively "
+        "owned by this section. These should not duplicate facts, "
+        "concepts, explanations, examples, or responsibilities "
+        "assigned to another section."
+    ),
     )
 
     target_words: int = Field(
@@ -105,8 +108,12 @@ class Task(BaseModel):
     )
 
     brief: str = Field(
-        ...,
-        description="What this section should cover.",
+    ...,
+    description=(
+        "A concise description of exactly what this section should "
+        "explain. It must stay within this section's ownership boundary "
+        "and must not develop topics assigned to other sections."
+    ),
     )
 
     tags: List[str] = Field(
@@ -128,6 +135,15 @@ class Task(BaseModel):
         default=False,
         description="Whether this section must contain a code example.",
     )
+
+    must_not_cover: List[str] = Field(
+        default_factory=list,
+        description=(
+        "Topics, facts, concepts, examples, or content areas "
+        "that belong to other sections and must not be developed "
+        "in this section."
+    ),
+)
 
 
 class Plan(BaseModel):
@@ -653,7 +669,7 @@ def _rank_and_select_sources(
     queries: List[str],
 ) -> List[dict]:
     """
-    Deduplicate, score and select at most 12 sources.
+    Deduplicate, score and select at most 8 sources.
 
     The full raw Tavily result set is NEVER passed to Gemini.
     """
@@ -771,7 +787,7 @@ Rules:
 - Keep snippets concise.
 - Do not create additional sources.
 - Deduplicate by URL.
-- Return at most 12 evidence items.
+- Return at most 8 evidence items.
 
 Return only the EvidencePack fields.
 """
@@ -779,7 +795,7 @@ Return only the EvidencePack fields.
 
 def research_node(state: ChatState) -> dict:
     """
-    Search Tavily, rank locally, and send ONLY the best 12
+    Search Tavily, rank locally, and send ONLY the best 8
     sources to Gemini.
     """
 
@@ -824,7 +840,7 @@ def research_node(state: ChatState) -> dict:
     )
 
     # IMPORTANT:
-    # Only selected_sources (max 12) are passed to Gemini.
+    # Only selected_sources (max 8) are passed to Gemini.
     compact_sources = []
 
     for item in selected_sources:
@@ -899,7 +915,6 @@ def research_node(state: ChatState) -> dict:
 # ============================================================
 # 11. ORCHESTRATOR
 # ============================================================
-
 ORCH_MESSAGE = """
 You are the senior content strategist and blog planner for a general-purpose
 AI blog writing system.
@@ -910,19 +925,222 @@ requested topic.
 The blog can be about ANY subject.
 
 IMPORTANT AUDIENCE RULE:
-- Assume that the reader is a general audience.
+- Assume the reader is a general audience.
 - Determine the appropriate level of explanation from the topic itself.
 - Use technical terminology only when it is relevant to the topic.
 - If the topic is technical, technical terminology is appropriate.
 - If the topic is non-technical, use language appropriate for a general reader.
 - Never inject programming, software engineering, developer terminology, or
-  technical analogies into a topic unless they are genuinely relevant.
+  technical analogies unless they are genuinely relevant to the topic.
 
-IMPORTANT WRITING RULE:
+
+============================================================
+SECTION STRUCTURE
+============================================================
+
+Create between 5 and 7 meaningful sections.
+
+The exact structure must be determined by the topic.
+
+Do NOT use a fixed template for every blog.
+
+Choose sections that naturally explain the specific topic and provide a
+logical progression for the reader.
+
+
+============================================================
+SECTION OWNERSHIP — CRITICAL
+============================================================
+
+The blog will be written by multiple independent workers running concurrently.
+
+Each worker will receive exactly ONE section.
+
+Therefore, sections MUST have strict and exclusive information ownership.
+
+Every important fact, concept, statistic, historical event, example, process,
+argument, explanation, or topic MUST have ONE clear section owner.
+
+NEVER assign the same major information to multiple sections.
+
+For every section:
+
+1. Define exactly what information the section owns.
+2. Define the specific concepts, facts, examples, or ideas that belong in it.
+3. Use the `bullets` field to list concrete information that this section owns.
+4. Use the `must_not_cover` field to explicitly identify important topics that
+   belong to OTHER sections.
+5. Make sure the section's bullets and `must_not_cover` do not contradict each
+   other.
+
+The `must_not_cover` field is a HARD boundary for the worker.
+
+If a topic belongs to another section, explicitly place that topic in
+`must_not_cover`.
+
+Do not leave important boundaries implicit when they can be stated clearly.
+
+
+============================================================
+HOW TO AVOID OVERLAPPING SECTIONS
+============================================================
+
+Before creating the final plan, mentally perform an ownership check.
+
+For every major topic ask:
+
+"Which ONE section owns this information?"
+
+Assign it to exactly one section.
+
+Then ask:
+
+"Could another section accidentally explain this same information?"
+
+If yes, add that topic to the other section's `must_not_cover`.
+
+Sections should complement one another, not compete with one another.
+
+
+============================================================
+SECTION EXAMPLES
+============================================================
+
+For example, if the topic is about the G20, a possible ownership structure
+could be:
+
+Section: Origins and Evolution
+
+Owns:
+- Why the G20 was created
+- The 1999 establishment
+- Its evolution from a finance-focused forum
+- Major historical changes in its role
+
+Must NOT cover:
+- Current membership details
+- Current organizational structure
+- Detailed discussion of recent summit initiatives
+
+
+Section: Membership and Structure
+
+Owns:
+- Current membership
+- Member categories
+- Rotating presidency
+- How the forum operates
+
+Must NOT cover:
+- Detailed history of the G20's creation
+- Detailed analysis of individual summit initiatives
+
+
+Section: Current Role and Influence
+
+Owns:
+- What the G20 does today
+- Areas currently addressed by the forum
+- Its influence on international cooperation
+
+Must NOT cover:
+- Detailed history of its creation
+- Detailed membership mechanics
+- Repeating the full historical evolution
+
+
+These are ONLY examples of ownership thinking.
+
+Do not force this exact structure onto unrelated topics.
+
+
+============================================================
+INTRODUCTION RULE
+============================================================
+
+If an introduction section is appropriate:
+
+- Introduce the topic.
+- Establish why the topic matters.
+- Give only enough context for the reader to understand the article.
+- Do NOT provide detailed explanations that belong to later sections.
+- Do NOT repeat statistics, examples, history, or detailed concepts that later
+  sections own.
+
+The introduction should set up the article, not consume the article.
+
+
+============================================================
+CONCLUSION RULE
+============================================================
+
+If a conclusion section is appropriate:
+
+- Synthesize the main ideas.
+- Explain the overall takeaway.
+- Leave the reader with a useful final perspective.
+
+Do NOT:
+
+- Re-explain every section.
+- Repeat large amounts of information.
+- Introduce substantial new concepts.
+- Repeat detailed statistics or examples from the body.
+
+
+============================================================
+BULLET RULE
+============================================================
+
+Every bullet must describe information primarily owned by that section.
+
+Bullets must be:
+
+- Concrete
+- Topic-specific
+- Non-overlapping
+- Useful to the worker writing that section
+
+Avoid vague bullets such as:
+
+- "Explain the topic"
+- "Discuss its importance"
+- "Talk about key points"
+- "Explain how it works"
+
+Instead, identify exactly WHAT the worker should explain.
+
+
+============================================================
+MUST_NOT_COVER RULE
+============================================================
+
+`must_not_cover` should contain the important topics that belong to other
+sections.
+
+Examples:
+
+- Current membership
+- Historical origins
+- Detailed implementation steps
+- Advanced technical architecture
+- Specific examples assigned to another section
+- Detailed statistics owned by another section
+
+Do NOT simply copy the same section's bullets into `must_not_cover`.
+
+The purpose of `must_not_cover` is to protect boundaries between workers.
+
+
+============================================================
+WRITING QUALITY
+============================================================
+
 The goal is to create a useful, accurate, engaging, and logically structured
 blog — not to make the content sound unnecessarily sophisticated.
 
 Prefer:
+
 - Clear explanations
 - Useful information
 - Logical progression
@@ -932,57 +1150,77 @@ Prefer:
 - Topic-specific terminology when relevant
 
 Avoid:
+
 - Unnecessary jargon
 - Forced technical terminology
 - Forced analogies
 - Developer-oriented language for non-technical topics
 - Overly complicated explanations
 - Generic filler
+- Repetitive sections
+- Generic sections that could apply to any unrelated topic
 
-The structure should be appropriate for the topic rather than following a
-fixed technical-blog template.
 
-The overall plan should contain approximately 5–7 meaningful sections when
-appropriate, but the exact number may vary if the topic naturally requires
-fewer or more sections.
+============================================================
+CODE RULE
+============================================================
 
-Each section should have:
-- A clear, meaningful heading
-- A concise description of what the section should cover
-- The key information that should be included
-- An indication of whether code is actually required
-
-CODE RULE:
 Code is OPTIONAL.
 
 Include code only when it is genuinely useful and relevant to the topic.
 
 For programming, software, technical, or other code-related topics:
+
 - Code may be appropriate.
-- Include a code example when it improves the explanation.
+- Set `requires_code` to true only when a code example genuinely improves
+  the section.
 
 For non-technical topics:
-- Do NOT force code into the blog.
-- Set requires_code to false unless there is a genuine reason for code.
 
-RESEARCH RULE:
+- Set `requires_code` to false.
+- Do not force programming examples into the article.
+
+
+============================================================
+RESEARCH RULE
+============================================================
+
 When research evidence is provided:
-- Use the evidence to guide the structure and factual coverage.
+
+- Use the evidence to guide factual coverage.
 - Prioritize authoritative and relevant sources.
-- Do not invent facts that are not supported by the available evidence.
-- Do not force research into sections where it is not relevant.
+- Do not invent facts that are not supported by the evidence.
+- Do not force every source into every section.
+- Assign each important research fact to the section that owns it.
+- Avoid repeating the same researched fact across multiple sections.
+- Mark `requires_research` and `requires_citations` according to the actual
+  needs of the section.
 
-QUALITY BAR:
-- The plan must directly address the user's topic.
-- The plan must make sense for the intended reader.
-- Each section should have a distinct purpose.
-- Avoid unnecessary repetition between sections.
-- Avoid generic sections that could apply to any unrelated topic.
-- Technical depth should match the subject and reader.
-- Do not introduce concepts merely because they sound advanced.
-- Keep the final blog useful and engaging rather than unnecessarily complex.
 
-Create the plan based on the following information.
+============================================================
+FINAL OWNERSHIP CHECK
+============================================================
+
+Before returning the plan, verify ALL of the following:
+
+1. There are 5–7 sections.
+2. Every section has a distinct purpose.
+3. Every section has concrete, topic-specific bullets.
+4. Major information has exactly one clear owner.
+5. Important cross-section boundaries are represented in `must_not_cover`.
+6. No section substantially duplicates another section.
+7. The introduction does not consume detailed body content.
+8. The conclusion does not repeat the entire article.
+9. Code is not forced into non-technical topics.
+10. Research is used only where relevant.
+11. The sections together form a logical progression.
+12. The plan can safely be handed to independent parallel workers without
+    causing them to write overlapping content.
+
+
+============================================================
+INPUT
+============================================================
 
 Topic:
 {topic}
@@ -993,9 +1231,9 @@ Research mode:
 Evidence:
 {evidence}
 
+
 Return the result using the required Plan schema.
 """
-
 def validate_plan(plan: Plan) -> Plan:
     """
     Validate the orchestrator's dynamic blog plan.
@@ -1043,18 +1281,18 @@ def validate_plan(plan: Plan) -> Plan:
             f"Expected {expected_ids}, got {sorted(task_ids)}"
         )
 
-    common_mistakes_count = sum(
-        task.section_type
-        == "common_mistakes"
-        for task in plan.tasks
-    )
+    # common_mistakes_count = sum(
+    #     task.section_type
+    #     == "common_mistakes"
+    #     for task in plan.tasks
+    # )
 
-    if common_mistakes_count != 1:
+    # if common_mistakes_count != 1:
 
-        raise ValueError(
-            "Plan must contain exactly one "
-            "'common_mistakes' section."
-        )
+    #     raise ValueError(
+    #         "Plan must contain exactly one "
+    #         "'common_mistakes' section."
+        # )
 
     return plan
 
@@ -1068,7 +1306,7 @@ def orchestrator_node(
         []
     )
 
-    # Never pass more than the selected 12 sources.
+    # Never pass more than the selected 8 sources.
     evidence_for_prompt = [
         item.model_dump()
         for item in evidence[
@@ -1114,25 +1352,138 @@ def orchestrator_node(
 # ============================================================
 # 12. WORKER PROMPT
 # ============================================================
-
 WORKER_SYSTEM = """
-You are a professional blog writer working inside a general-purpose AI blog
-writing system.
+You are a specialist writer in a parallel multi-agent blog writing system.
 
-Your task is to write one section of a larger blog based strictly on the
-section plan and the information provided to you.
+You are responsible for EXACTLY ONE section of a larger blog.
 
-IMPORTANT AUDIENCE RULE:
-- Assume the reader is general audience.
-- Write for the audience naturally implied by the topic.
-- Match the complexity and terminology to the subject.
-- Technical terminology is appropriate when the topic requires it.
-- Avoid technical or developer terminology when it is irrelevant to the topic.
+Other workers are independently writing the other sections concurrently.
+You must therefore respect strict section ownership.
 
-IMPORTANT STYLE RULE:
-Write naturally and clearly.
+==================================================
+1. YOUR RESPONSIBILITY
+==================================================
+
+Write ONLY your assigned section.
+
+Your assigned section is defined by:
+- Its title
+- Its goal
+- Its bullets
+- Its brief
+- Its section type
+- Its must_not_cover boundaries
+
+Treat these instructions as the boundaries of your work.
+
+Do NOT write the entire blog.
+
+Do NOT write another worker's section.
+
+Do NOT expand your section into topics that belong to another section.
+
+
+==================================================
+2. SECTION OWNERSHIP — CRITICAL
+==================================================
+
+Each section has an exclusive information responsibility.
+
+You MUST:
+
+- Cover the important points listed in your section's bullets.
+- Stay focused on the goal of your section.
+- Respect the topics listed in must_not_cover.
+- Assume that another worker owns every other section.
+- Avoid developing another section's main ideas.
+- Avoid repeating facts, statistics, definitions, examples, historical
+  events, explanations, or arguments that belong primarily to another
+  section.
+
+If another section's topic is necessary for context:
+
+- Mention it briefly only when necessary.
+- Do not explain it in detail.
+- Do not turn that brief reference into a second section.
+
+The purpose of your section is to ADD new information to the article,
+not repeat information that another worker is already responsible for.
+
+
+==================================================
+3. MUST_NOT_COVER — CRITICAL
+==================================================
+
+The section plan may provide a list called must_not_cover.
+
+These are topics or information areas owned by other sections.
+
+You MUST NOT develop these topics.
+
+For example, if your section is:
+
+"Membership and Structure"
+
+and must_not_cover contains:
+
+- Origins of the G20
+- Asian financial crisis
+- Historical evolution
+- Recent summit outcomes
+
+then you may briefly mention the origins if needed for context, but you
+must NOT explain the Asian financial crisis or the history of the G20.
+
+Treat must_not_cover as a hard boundary.
+
+
+==================================================
+4. OTHER SECTION OWNERSHIP
+==================================================
+
+You may be shown the complete section map.
+
+Use it to understand what other workers are responsible for.
+
+If another section owns a topic, do not develop that topic in your section.
+
+Do NOT attempt to make your section self-contained by explaining every
+important aspect of the overall topic.
+
+The complete blog will be assembled later by a reducer.
+
+Your job is only to produce your assigned contribution.
+
+
+==================================================
+5. AUDIENCE
+==================================================
+
+Assume a general audience unless the topic clearly requires a different
+level of expertise.
+
+Write for the audience naturally implied by the topic.
+
+Match terminology and depth to the subject.
+
+For technical topics:
+- Technical terminology is appropriate when relevant.
+- Explain specialized concepts clearly when the reader needs the context.
+
+For non-technical topics:
+- Use natural, accessible language.
+- Do not introduce programming, software engineering, developer terminology,
+  or technical metaphors unless directly relevant to the subject.
+
+
+==================================================
+6. WRITING STYLE
+==================================================
+
+Write naturally, clearly, and professionally.
 
 Prioritize:
+
 - Accuracy
 - Clarity
 - Relevance
@@ -1140,48 +1491,179 @@ Prioritize:
 - Logical explanation
 - Appropriate depth
 - Natural transitions
-- Concrete examples when useful
+- Concrete examples when genuinely useful
 
 Avoid:
+
 - Unnecessary jargon
 - Forced technical language
 - Forced programming analogies
 - Developer-centric metaphors
-- Repetitive explanations
 - Generic filler
-- Claims that sound authoritative but are unsupported by the provided
-  evidence
+- Repetitive explanations
+- Rephrasing the same point multiple times
+- Artificially sophisticated language
+- Unsupported authoritative-sounding claims
 
-CODE RULE:
-Only include code when the section plan explicitly indicates that code is
-required AND code is genuinely relevant to the topic.
 
-Never add code simply because this system is capable of generating code.
+==================================================
+7. INTRODUCTION SECTIONS
+==================================================
 
-For non-technical topics, do not introduce programming examples, software
-concepts, debugging terminology, developer metaphors, or engineering
-terminology unless they are directly relevant to the subject.
+If your assigned section is the introduction:
 
-RESEARCH AND ACCURACY:
-- Use the provided evidence when it is relevant to the section.
-- Do not invent statistics, measurements, studies, technical claims, or other
-  factual details.
-- Do not exaggerate conclusions from the available evidence.
-- If evidence is insufficient for a specific claim, avoid presenting the claim
-  as established fact.
-- Prefer simple and accurate explanations over unnecessarily sophisticated
-  explanations.
+- Briefly establish what the topic is.
+- Explain why the topic matters.
+- Give the reader enough context to understand the rest of the article.
+- Do NOT explain the detailed content owned by later sections.
+- Do NOT provide a detailed history, feature list, process explanation,
+  examples, or current developments unless those are explicitly owned
+  by the introduction.
 
-SECTION RULE:
-Write only the requested section.
+The introduction should orient the reader, not write the entire article.
 
-Do not write the entire blog.
-Do not add an unrelated introduction or conclusion.
-Do not repeat content that belongs to another section.
 
-The section should fit naturally into the overall blog described by the plan.
+==================================================
+8. CONCLUSION SECTIONS
+==================================================
 
-Return only the section content in the format required by the application.
+If your assigned section is the conclusion:
+
+- Synthesize the major ideas of the article.
+- Give the reader a useful final takeaway.
+- Connect the major ideas at a high level.
+- Do NOT repeat every section in detail.
+- Do NOT introduce substantial new information.
+- Do NOT simply copy or rephrase the article's earlier paragraphs.
+
+The conclusion should provide synthesis rather than repetition.
+
+
+==================================================
+9. RESEARCH AND ACCURACY
+==================================================
+
+Use the provided evidence when it is relevant to your assigned section.
+
+You do NOT need to use every provided source.
+
+Only use evidence that supports the content you are writing.
+
+Rules:
+
+- Do not invent statistics.
+- Do not invent dates.
+- Do not invent studies.
+- Do not invent quotations.
+- Do not invent technical claims.
+- Do not exaggerate conclusions from the evidence.
+- Do not present unsupported claims as established facts.
+- Prefer accurate and appropriately qualified statements.
+- Do not repeat a factual claim merely because it appears in multiple
+  sources.
+
+If the available evidence does not adequately support a specific factual
+claim, avoid presenting that claim as established fact.
+
+
+==================================================
+10. CITATIONS
+==================================================
+
+When citations are required by the section plan:
+
+- Cite claims using only the provided evidence.
+- Use the source URL exactly as provided by the application.
+- Do not invent URLs.
+- Do not cite a source that does not support the claim.
+- Do not add a separate Sources section.
+- Do not create a bibliography.
+
+The reducer/application will handle final blog assembly.
+
+
+==================================================
+11. CODE
+==================================================
+
+Code is OPTIONAL.
+
+Only include code when:
+
+1. The section plan explicitly indicates that code is required, AND
+2. Code is genuinely relevant and useful to the reader.
+
+Never include code merely because this system can generate code.
+
+For non-technical topics:
+
+- Do NOT introduce programming examples.
+- Do NOT introduce software concepts.
+- Do NOT introduce debugging terminology.
+- Do NOT introduce developer metaphors.
+
+For technical topics:
+
+- Include code only when it materially improves the explanation.
+
+
+==================================================
+12. SECTION LENGTH AND DEPTH
+==================================================
+
+Respect the target word count provided by the section plan.
+
+Do not artificially inflate the section.
+
+Do not add filler to reach the target.
+
+Prioritize useful information over length.
+
+If the section can be explained clearly in fewer words, prefer concise,
+information-dense writing over repetition.
+
+
+==================================================
+13. HEADING RULE
+==================================================
+
+Return ONLY the body content of the assigned section.
+
+Do NOT create the section heading yourself.
+
+Do NOT add:
+
+- A "# Title"
+- A "## Section Title"
+- "Sources"
+- "References"
+- A conclusion unless the assigned section is the conclusion
+- An introduction unless the assigned section is the introduction
+- Any content belonging to another section
+
+
+==================================================
+14. FINAL SELF-CHECK
+==================================================
+
+Before returning the section, check:
+
+1. Am I writing ONLY my assigned section?
+2. Did I cover the important bullets?
+3. Did I follow the section goal and brief?
+4. Did I avoid everything listed in must_not_cover?
+5. Did I avoid developing another section's main ideas?
+6. Did I avoid repeating major facts unnecessarily?
+7. Did I use evidence only where relevant?
+8. Did I avoid unsupported claims?
+9. Did I avoid unnecessary filler?
+10. Did I avoid adding my own heading?
+11. Did I follow the requested word count?
+12. Does this section add NEW information to the overall article?
+
+If any answer is "no", revise the section before returning it.
+
+Return ONLY the section content in the format required by the application.
 """
 
 
@@ -1210,6 +1692,132 @@ def _build_worker_payload(
         ],
     }
 
+def _clean_worker_section(
+    section_md: str,
+    task: Task,
+) -> str:
+    """
+    Clean and normalize a worker-generated section.
+
+    Workers are instructed to return only section body content,
+    but this function protects the final blog from accidental:
+
+    - Markdown section headings
+    - Duplicate section headings
+    - Streamlit [svg](...) anchor artifacts
+    - Sources / References blocks
+    - Excessive blank lines
+    """
+
+    if not section_md:
+        return ""
+
+    text = section_md.strip()
+
+    # --------------------------------------------------------
+    # 1. Remove Streamlit/browser anchor artifacts
+    # --------------------------------------------------------
+    #
+    # Example unwanted output:
+    #
+    # [svg](http://localhost:8501/#some-heading)
+    #
+    text = re.sub(
+        r"\[svg\]\([^)]*\)",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # --------------------------------------------------------
+    # 2. Remove accidental heading matching this section title
+    # --------------------------------------------------------
+
+    expected_title = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        task.title.lower(),
+    ).strip()
+
+    lines = text.splitlines()
+
+    while lines:
+
+        first_line = lines[0].strip()
+
+        heading_match = re.match(
+            r"^#{1,6}\s+(.+?)\s*$",
+            first_line,
+        )
+
+        if not heading_match:
+            break
+
+        actual_heading = re.sub(
+            r"[^a-z0-9]+",
+            " ",
+            heading_match.group(1).lower(),
+        ).strip()
+
+        if actual_heading == expected_title:
+            lines.pop(0)
+            continue
+
+        break
+
+    text = "\n".join(lines).strip()
+
+    # --------------------------------------------------------
+    # 3. Remove accidental Sources / References section
+    # --------------------------------------------------------
+    #
+    # Workers are not supposed to create their own Sources section.
+    #
+    # Remove everything starting from a standalone:
+    #
+    # ## Sources
+    # ### Sources
+    # Sources:
+    # ## References
+    # ### References
+    #
+
+    text = re.sub(
+        r"\n#{1,6}\s*(?:Sources|References)\s*:?\s*\n.*$",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    text = re.sub(
+        r"\n(?:Sources|References)\s*:?\s*\n.*$",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    # --------------------------------------------------------
+    # 4. Remove trailing standalone Sources / References
+    # --------------------------------------------------------
+
+    text = re.sub(
+        r"(?:^|\n)\s*#{1,6}\s*(?:Sources|References)\s*:?\s*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # --------------------------------------------------------
+    # 5. Remove excessive blank lines
+    # --------------------------------------------------------
+
+    text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        text,
+    ).strip()
+
+    return text
 
 def _generate_worker_section(
     payload: dict,
@@ -1244,6 +1852,14 @@ def _generate_worker_section(
         f"- {bullet}"
         for bullet in task.bullets
     )
+
+    must_not_cover_text = "\n".join(
+        f"- {item}"
+        for item in task.must_not_cover
+    )
+
+    if not must_not_cover_text:
+        must_not_cover_text = "- None explicitly assigned."
 
     evidence_lines = []
 
@@ -1319,8 +1935,11 @@ def _generate_worker_section(
                     f"requires_code:\n"
                     f"{task.requires_code}\n\n"
 
-                    f"Bullets:\n"
+                    f"YOUR SECTION'S EXCLUSIVE BULLETS:\n"
                     f"{bullets_text}\n\n"
+
+                    f"Must NOT cover:\n"
+                    f"{must_not_cover_text or '- None specified'}\n\n"
 
                     "Evidence "
                     "(ONLY use these URLs when citing):\n"
@@ -1343,6 +1962,11 @@ def _generate_worker_section(
             "response from Gemini."
         )
 
+    section_md = _clean_worker_section(
+        section_md,
+        task,
+    )
+
     return (
         task.id,
         section_md,
@@ -1350,88 +1974,110 @@ def _generate_worker_section(
 
 
 # ============================================================
-# 14. SEQUENTIAL WORKERS
+# 14. PARALLEL WORKERS (LANGGRAPH FAN-OUT / FAN-IN)
 # ============================================================
 
-def workers_node(
-    state: ChatState,
+class WorkerState(TypedDict):
+    """
+    State received by one dynamically created worker branch.
+
+    Each worker receives exactly one planned Task, while the
+    parent ChatState keeps the shared blog-generation state.
+    """
+
+    plan: Plan
+
+    task: Task
+
+    topic: str
+
+    mode: str
+
+    evidence: List[EvidenceItem]
+
+
+def worker_node(
+    state: WorkerState,
 ) -> dict:
     """
-    Generate all planned sections sequentially.
+    Generate exactly one blog section.
 
-    The orchestrator decides whether there are 5, 6, or 7
-    sections. Workers then process exactly those tasks.
-
-    Sequential execution is intentional to avoid launching
-    multiple Gemini requests concurrently and hitting
-    provider-side rate limits.
+    LangGraph invokes this node once for every Task emitted by
+    the fan-out function. The invocations can run concurrently.
     """
 
-    plan = state.get(
-        "plan"
+    payload = _build_worker_payload(
+        plan=state["plan"],
+        task=state["task"],
+        topic=state["topic"],
+        mode=state.get(
+            "mode",
+            "closed_book",
+        ),
+        evidence=state.get(
+            "evidence",
+            [],
+        ),
     )
 
-    if plan is None:
+    task_id, section_md = _generate_worker_section(
+        payload
+    )
 
-        raise ValueError(
-            "Cannot run workers because plan is None."
-        )
-
-    tasks = plan.tasks
-
-    task_count = len(tasks)
-
-    if not (
-        MIN_SECTIONS
-        <= task_count
-        <= MAX_SECTIONS
-    ):
-
-        raise ValueError(
-            f"Expected between "
-            f"{MIN_SECTIONS} and {MAX_SECTIONS} tasks, "
-            f"got {task_count}"
-        )
-
-    evidence = state.get(
-        "evidence",
-        []
-    )[
-        :MAX_EVIDENCE_SOURCES
-    ]
-
-    sections = []
-
-    for task in tasks:
-
-        payload = _build_worker_payload(
-            plan=plan,
-            task=task,
-            topic=state["topic"],
-            mode=state.get(
-                "mode",
-                "closed_book",
-            ),
-            evidence=evidence,
-        )
-
-        task_id, section_md = (
-            _generate_worker_section(
-                payload
-            )
-        )
-
-        sections.append(
+    return {
+        "sections": [
             (
                 task_id,
                 section_md,
             )
-        )
-
-    return {
-        "sections": sections
+        ]
     }
 
+
+def fan_out_workers(
+    state: ChatState,
+) -> List[Send]:
+
+    plan = state.get("plan")
+
+    if plan is None:
+        raise ValueError(
+            "Cannot fan out workers because plan is None."
+        )
+
+    evidence = state.get(
+        "evidence",
+        [],
+    )[:MAX_EVIDENCE_SOURCES]
+
+    topic = state.get(
+        "topic",
+        "",
+    )
+
+    mode = state.get(
+        "mode",
+        "closed_book",
+    )
+
+    sends = []
+
+    for task in plan.tasks:
+
+        sends.append(
+            Send(
+                "worker",
+                {
+                    "plan": plan,
+                    "task": task,
+                    "topic": topic,
+                    "mode": mode,
+                    "evidence": evidence,
+                },
+            )
+        )
+
+    return sends
 
 # ============================================================
 # 15. FILENAME SANITIZATION
@@ -1457,21 +2103,13 @@ def safe_filename(title: str) -> str:
 # ============================================================
 # 16. REDUCER
 # ============================================================
-
 def reducer(
     state: ChatState,
 ) -> dict:
-    """
-    Combine all dynamically generated worker sections in
-    task-ID order and return the final Markdown content.
-    """
 
-    plan = state.get(
-        "plan"
-    )
+    plan = state.get("plan")
 
     if plan is None:
-
         raise ValueError(
             "Cannot reduce because plan is None."
         )
@@ -1481,28 +2119,143 @@ def reducer(
         []
     )
 
-    ordered_sections = [
-        markdown
-        for _, markdown
-        in sorted(
-            sections,
-            key=lambda item: item[0],
-        )
+    # --------------------------------------------------------
+    # 1. Build the expected task map
+    # --------------------------------------------------------
+
+    task_by_id = {
+        task.id: task
+        for task in plan.tasks
+    }
+
+    expected_ids = set(
+        task_by_id.keys()
+    )
+
+    # --------------------------------------------------------
+    # 2. Make sure every worker returned a valid result
+    # --------------------------------------------------------
+
+    returned_ids = [
+        task_id
+        for task_id, _ in sections
     ]
+
+    returned_id_set = set(
+        returned_ids
+    )
+
+    # --------------------------------------------------------
+    # 3. Detect duplicate worker results
+    # --------------------------------------------------------
+
+    if len(returned_ids) != len(returned_id_set):
+
+        duplicates = sorted(
+            task_id
+            for task_id in returned_id_set
+            if returned_ids.count(task_id) > 1
+        )
+
+        raise ValueError(
+            "Duplicate worker results detected for "
+            f"task IDs: {duplicates}"
+        )
+
+    # --------------------------------------------------------
+    # 4. Detect unknown worker results
+    # --------------------------------------------------------
+
+    unknown_ids = (
+        returned_id_set
+        - expected_ids
+    )
+
+    if unknown_ids:
+
+        raise ValueError(
+            "Worker returned unknown task IDs: "
+            f"{sorted(unknown_ids)}"
+        )
+
+    # --------------------------------------------------------
+    # 5. Detect missing worker results
+    # --------------------------------------------------------
+
+    missing_ids = (
+        expected_ids
+        - returned_id_set
+    )
+
+    if missing_ids:
+
+        missing_titles = [
+            task_by_id[task_id].title
+            for task_id in sorted(
+                missing_ids
+            )
+        ]
+
+        raise ValueError(
+            "Missing worker results for task IDs: "
+            f"{sorted(missing_ids)}. "
+            f"Missing sections: {missing_titles}"
+        )
+
+    # --------------------------------------------------------
+    # 6. Validate worker content
+    # --------------------------------------------------------
+
+    for task_id, markdown in sections:
+
+        if not isinstance(
+            markdown,
+            str
+        ) or not markdown.strip():
+
+            task_title = task_by_id[
+                task_id
+            ].title
+
+            raise ValueError(
+                "Worker returned empty content for "
+                f"task {task_id}: '{task_title}'"
+            )
+
+    # --------------------------------------------------------
+    # 7. Sort sections according to task ID
+    # --------------------------------------------------------
+
+    ordered_sections = []
+
+    for task_id, markdown in sorted(
+        sections,
+        key=lambda item: item[0],
+    ):
+
+        task = task_by_id[
+            task_id
+        ]
+
+        ordered_sections.append(
+            f"## {task.title}\n\n"
+            f"{markdown.strip()}"
+        )
+
+    # --------------------------------------------------------
+    # 8. Assemble final blog
+    # --------------------------------------------------------
 
     body = "\n\n".join(
         ordered_sections
     ).strip()
 
-    final_md = (
-        f"# {plan.blog_title}\n\n"
-        f"{body}\n"
-    )
-
     return {
-        "final_md": final_md
+        "final_md": (
+            f"# {plan.blog_title}\n\n"
+            f"{body}\n"
+        )
     }
-
 
 # ============================================================
 # 17. BUILD LANGGRAPH
@@ -1527,10 +2280,12 @@ g.add_node(
     orchestrator_node,
 )
 
-# One node executes the five workers sequentially.
+# One reusable worker node is dynamically fanned out by
+# `fan_out_workers`. LangGraph can execute the generated
+# worker branches concurrently.
 g.add_node(
-    "workers",
-    workers_node,
+    "worker",
+    worker_node,
 )
 
 g.add_node(
@@ -1561,14 +2316,14 @@ g.add_edge(
 )
 
 
-g.add_edge(
+g.add_conditional_edges(
     "orchestrator",
-    "workers",
+    fan_out_workers,
 )
 
 
 g.add_edge(
-    "workers",
+    "worker",
     "reducer",
 )
 
@@ -1636,9 +2391,10 @@ def run(topic: str):
 
 def run_stream(topic: str):
     """
-    The worker LLM calls are intentionally sequential
-    inside the workers node. The number of calls is determined
-    by the orchestrator's 5–7 section plan.
+    The worker LLM calls are fanned out by LangGraph.
+    One worker branch is created for each section in the
+    orchestrator's 5–7 section plan, allowing independent
+    sections to be generated concurrently.
     """
 
     topic = str(
