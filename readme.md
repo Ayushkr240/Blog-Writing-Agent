@@ -40,59 +40,59 @@ Built with **LangGraph, LangChain, Google Gemini, Tavily, Streamlit, Pydantic, a
 The application uses a **LangGraph StateGraph** to coordinate specialized stages.
 
 ```text
-                    ┌─────────────┐
-                    │    START    │
-                    └──────┬──────┘
-                           ↓
-                    ┌─────────────┐
-                    │   Router    │
-                    │             │
-                    │ Analyze     │
-                    │ topic       │
-                    └──────┬──────┘
-                           │
-                ┌──────────┴──────────┐
-                ↓                     ↓
-        ┌──────────────┐       No Research
-        │   Research   │              │
-        │              │              │
-        │ Tavily       │              │
-        │ Search       │              │
-        └──────┬───────┘              │
-               └──────────┬───────────┘
-                          ↓
-                  ┌──────────────┐
-                  │ Orchestrator │
-                  │              │
-                  │ Create Plan  │
-                  └──────┬───────┘
-                         ↓
-              ┌─────────────────────┐
-              │   Parallel Workers  │
-              │                     │
-              │ Section 1 ──┐      │
-              │ Section 2 ──┤      │
-              │ Section 3 ──┤      │
-              │ Section 4 ──┤      │
-              │ Section 5 ──┤      │
-              │ Section 6 ──┤      │
-              │ Section 7 ──┘      │
-              └──────────┬──────────┘
-                         ↓
-                  ┌─────────────┐
-                  │   Reducer   │
-                  │             │
-                  │ Validate &  │
-                  │ combine     │
-                  └──────┬──────┘
-                         ↓
-                       END
-                         ↓
-                 ┌───────────────┐
-                 │   Exporters   │
-                 │ MD/TXT/HTML   │
-                 │ DOCX/PDF      │
-                 └───────────────┘
+┌─────────────┐
+│    START    │
+└──────┬──────┘
+       ↓
+┌─────────────┐
+│   Router    │
+│             │
+│ Analyze     │
+│ topic       │
+└──────┬──────┘
+       │
+   ┌───┴───────────────┐
+   ↓                   ↓
+┌──────────────┐    No Research
+│   Research   │         │
+│              │         │
+│ Tavily       │         │
+│ Search       │         │
+└──────┬───────┘         │
+       └──────────┬──────┘
+                  ↓
+          ┌──────────────┐
+          │ Orchestrator │
+          │              │
+          │ Create Plan  │
+          └──────┬───────┘
+                 ↓
+       ┌─────────────────────┐
+       │   Parallel Workers  │
+       │                     │
+       │ Section 1 ──┐       │
+       │ Section 2 ──┤       │
+       │ Section 3 ──┤       │
+       │ Section 4 ──┤       │
+       │ Section 5 ──┤       │
+       │ Section 6 ──┤       │
+       │ Section 7 ──┘       │
+       └──────────┬──────────┘
+                  ↓
+          ┌─────────────┐
+          │   Reducer   │
+          │             │
+          │ Validate &  │
+          │ combine     │
+          └──────┬──────┘
+                 ↓
+                END
+                 ↓
+        ┌─────────────────┐
+        │    Exporters    │
+        │ MD/TXT/HTML     │
+        │ DOCX/PDF        │
+        └─────────────────┘
 ```
 
 ---
@@ -181,10 +181,10 @@ Owns: History
 Section B
     ↓
 Owns: Current Applications
-    ↓
-must_not_cover:
-- History
-- Future Developments
+
+    must_not_cover:
+    - History
+    - Future Developments
 
 Section C
     ↓
@@ -203,6 +203,7 @@ After the workers finish, the reducer:
 - Detects missing worker results
 - Detects duplicate worker results
 - Rejects unknown task IDs
+- Rejects empty worker content
 - Sorts sections according to their planned order
 - Adds section headings
 - Combines everything into the final Markdown blog
@@ -283,7 +284,17 @@ LangSmith is intentionally kept separate from the Streamlit interface.
 ```text
 Blog_Writing_Agent/
 │
-├── backend.py
+├── backend/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── schemas.py
+│   ├── llm.py
+│   ├── research.py
+│   ├── planner.py
+│   ├── workers.py
+│   ├── reducer.py
+│   └── graph.py
+│
 ├── frontend.py
 ├── exporters.py
 ├── requirements.txt
@@ -292,19 +303,97 @@ Blog_Writing_Agent/
 └── README.md
 ```
 
-### `backend.py`
+### `backend/`
 
-Contains the LangGraph workflow:
+The backend is organized into focused modules instead of a single large file.
 
-- State definitions
+#### `config.py`
+
+Contains:
+
+- Environment configuration
+- Model configuration
+- Research limits
+- Evidence limits
+- Section limits
+
+#### `schemas.py`
+
+Contains:
+
 - Pydantic schemas
-- Router
-- Research pipeline
-- Source ranking
-- Orchestrator
-- Parallel workers
-- Reducer
-- Streaming runner
+- Router decision schema
+- Evidence schemas
+- Blog plan schema
+- Task schema
+- LangGraph state definitions
+
+#### `llm.py`
+
+Handles:
+
+- Google Gemini initialization
+- LLM response text extraction
+- Structured LLM invocation
+
+#### `research.py`
+
+Handles:
+
+- Research routing
+- Tavily search
+- Search-result processing
+- Source deduplication
+- Source-authority scoring
+- Evidence selection
+- Evidence synthesis
+
+#### `planner.py`
+
+Handles:
+
+- Blog planning
+- Section ownership
+- Plan validation
+- Orchestrator node
+
+#### `workers.py`
+
+Handles:
+
+- Worker prompts
+- Worker payload construction
+- Section generation
+- Worker output cleanup
+- Parallel worker fan-out
+
+#### `reducer.py`
+
+Handles:
+
+- Worker-result validation
+- Section ordering
+- Final Markdown assembly
+
+#### `graph.py`
+
+Handles:
+
+- LangGraph StateGraph construction
+- Node connections
+- Conditional routing
+- Application compilation
+- Backend runners
+
+#### `__init__.py`
+
+Provides the public backend interface:
+
+```python
+from backend import run, run_stream, generate_blog
+```
+
+---
 
 ### `frontend.py`
 
@@ -317,6 +406,8 @@ Contains the Streamlit application:
 - Session-state persistence
 - Export selection
 - Downloads
+
+---
 
 ### `exporters.py`
 
@@ -388,10 +479,13 @@ Create a `.env` file in the project root:
 
 ```env
 GOOGLE_API_KEY=your_api_key
+
 TAVILY_API_KEY=your_tavily_api_key
 
 LANGSMITH_API_KEY=your_langsmith_api_key
+
 LANGSMITH_TRACING=true
+
 LANGSMITH_PROJECT=your_project_name
 ```
 
@@ -455,27 +549,27 @@ Each component has a focused responsibility:
 
 ```text
 Router
-  ↓
+    ↓
 Decides whether research is required
 
 Research
-  ↓
+    ↓
 Collects and ranks external evidence
 
 Orchestrator
-  ↓
+    ↓
 Creates the blog structure and section ownership
 
 Workers
-  ↓
+    ↓
 Generate independent sections in parallel
 
 Reducer
-  ↓
+    ↓
 Validates and assembles the final blog
 
 Exporters
-  ↓
+    ↓
 Convert the blog into multiple formats
 ```
 
@@ -531,12 +625,14 @@ Multi-format Export
 LangSmith Observability
 ```
 
-The backend, frontend, exporter, and observability layers are separated so they can evolve independently.
+The **backend, frontend, exporter, and observability layers are separated** so they can evolve independently.
+
+The backend has also been modularized into focused components and verified with an automated test suite.
 
 ---
 
-## 👨‍💻 Author
+# 👨‍💻 Author
 
 **Ayush Kumar**
 
-Built as a practical exploration of **multi-agent systems, LangGraph workflows, research-grounded generation, and AI application development.**
+Built as a practical exploration of **agent systems, LangGraph workflows, research-grounded generation, and AI application development.**
